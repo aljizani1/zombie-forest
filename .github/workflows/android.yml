@@ -47,6 +47,10 @@ jobs:
       - name: Signing key
         run: echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > $RUNNER_TEMP/release.keystore
 
+      # رقم النسخة يطلع بالقائمة (حتى تعرف إذا التحديث وصلك)
+      - name: Version
+        run: echo "${GITHUB_SHA::8}" > version.txt
+
       - name: Export APK
         env:
           GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ runner.temp }}/release.keystore

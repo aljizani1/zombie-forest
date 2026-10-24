@@ -119,6 +119,7 @@ class Inp:
 	var swap := false
 	var throw := false # رمي رمانة مباشرة
 	var reload := false
+	var select := "" # اختيار مباشر (كرك/طابوق/سلاح)
 	var aim = null # زاوية التصويب، null = قدّام
 
 
@@ -545,6 +546,16 @@ func update_local(p: Player, inp: Inp, dt: float) -> void:
 			if list.size() > 1:
 				p.weapon = list[(list.find(p.weapon) + 1) % list.size()]
 				p.fire_cd = maxf(p.fire_cd, 0.2)
+				p.reload = 0
+		if inp.select != "":
+			# زر الكرك/الطابوق: يختاره، وإذا مختار أصلاً يرجع للسلاح
+			var want := inp.select
+			inp.select = ""
+			if want == p.weapon:
+				want = best_gun()
+			if slots(p).has(want):
+				p.weapon = want
+				p.fire_cd = maxf(p.fire_cd, 0.15)
 				p.reload = 0
 		if inp.throw:
 			inp.throw = false

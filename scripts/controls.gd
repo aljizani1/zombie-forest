@@ -12,6 +12,8 @@ const LAYOUT := {
 	"jump": {x = 0.68, y = 0.85, size = 72.0},
 	"swap": {x = 0.93, y = 0.4, size = 60.0},
 	"nade": {x = 0.84, y = 0.4, size = 60.0},
+	"shovel": {x = 0.75, y = 0.4, size = 60.0},
+	"brick": {x = 0.66, y = 0.4, size = 60.0},
 }
 
 var inp: Game.Inp
@@ -81,6 +83,9 @@ func _press(id: String, pos: Vector2) -> void:
 			inp.swap = true
 		"nade":
 			inp.throw = true
+		"shovel", "brick":
+			# نفس الزر مرة ثانية يرجّعك للسلاح
+			inp.select = id
 	queue_redraw()
 
 
@@ -142,7 +147,7 @@ func _draw() -> void:
 		else:
 			var down: bool = _pressed.has(id)
 			var rr := r * (0.9 if down else 1.0)
-			var bg := Color(0.86, 0.15, 0.15, 0.8 * a) if id == "jump" else (Color(0.3, 0.4, 0.2, 0.8 * a) if id == "nade" else Color(0.15, 0.15, 0.16, 0.75 * a))
+			var bg := Color(0.86, 0.15, 0.15, 0.8 * a) if id == "jump" else (Color(0.3, 0.4, 0.2, 0.8 * a) if id == "nade" else (Color(0.45, 0.3, 0.15, 0.85 * a) if id == "shovel" or id == "brick" else Color(0.15, 0.15, 0.16, 0.75 * a)))
 			draw_circle(c + Vector2(0, 4), rr, Color(0, 0, 0, 0.35 * a))
 			draw_circle(c, rr, bg)
 			draw_arc(c, rr - 2, 0, TAU, 32, Color(1, 1, 1, 0.85 * a), 4, true)
@@ -158,3 +163,12 @@ func _draw() -> void:
 				"nade":
 					draw_circle(c + Vector2(0, s * 0.15), s * 0.6, w)
 					draw_rect(Rect2(c + Vector2(-s * 0.25, -s * 0.75), Vector2(s * 0.5, s * 0.35)), w)
+				"shovel":
+					# كرك: يد مايلة وراس
+					draw_line(c + Vector2(-s * 0.8, s * 0.8), c + Vector2(s * 0.4, -s * 0.4), w, 4, true)
+					draw_colored_polygon(PackedVector2Array([c + Vector2(s * 0.1, -s * 0.7), c + Vector2(s * 0.9, -s * 0.2), c + Vector2(s * 0.7, s * 0.1), c + Vector2(-s * 0.1, -s * 0.4)]), w)
+				"brick":
+					draw_rect(Rect2(c + Vector2(-s * 0.8, -s * 0.5), Vector2(s * 1.6, s)), Color("#c0602f", a))
+					draw_rect(Rect2(c + Vector2(-s * 0.8, -s * 0.5), Vector2(s * 1.6, s)), w, false, 2)
+					draw_line(c + Vector2(-s * 0.8, 0), c + Vector2(s * 0.8, 0), w, 2)
+					draw_line(c + Vector2(0, -s * 0.5), c + Vector2(0, 0), w, 2)

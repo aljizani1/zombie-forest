@@ -6,6 +6,8 @@ extends Node2D
 
 const SAVE_PATH := "user://save.cfg"
 const BRICK_PRICE := 40 # سعر 10 طابوقات
+# رقم النسخة (GitHub يكتبه بكل بناء)
+var VERSION := FileAccess.get_file_as_string("res://version.txt").strip_edges()
 
 # الإنجازات: المعرّف ← [الاسم، الوصف]
 const ACHIEVEMENTS := {
@@ -110,7 +112,7 @@ func _ready() -> void:
 	ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(ui)
 
-	_use_touch = DisplayServer.is_touchscreen_available() or OS.has_feature("mobile")
+	_use_touch = DisplayServer.is_touchscreen_available() or OS.has_feature("mobile") or OS.get_cmdline_user_args().has("--touch")
 
 	# للفحص: يلعب لوحده شوية ويحفظ صورة الشاشة ويطلع (بدون حساب)
 	var args := OS.get_cmdline_user_args()
@@ -406,6 +408,7 @@ func _show_menu() -> void:
 	_button("الإعدادات", _show_settings, r2)
 	if is_admin:
 		_button("لوحة الأدمن", _show_admin, r2, false, Color("#5b2a86"))
+	_label("النسخة: " + VERSION, 18, box, Color(1, 1, 1, 0.55))
 
 
 
@@ -796,6 +799,12 @@ func _unhandled_input(e: InputEvent) -> void:
 				inp.throw = true
 			KEY_R:
 				inp.reload = true
+			KEY_1:
+				inp.select = game.best_gun()
+			KEY_2:
+				inp.select = "shovel"
+			KEY_3:
+				inp.select = "brick"
 			KEY_ESCAPE:
 				_quit_game()
 			KEY_A, KEY_D, KEY_LEFT, KEY_RIGHT:
