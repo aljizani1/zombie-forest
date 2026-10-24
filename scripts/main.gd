@@ -115,9 +115,11 @@ func _ready() -> void:
 		if args.has("--lan-host") or args.has("--lan-join"):
 			_auto_lan(args.has("--lan-host"))
 			return
-		if args.has("--menu") or args.has("--boot"):
+		if args.has("--menu") or args.has("--boot") or args.has("--board"):
 			if args.has("--boot"):
 				_boot()
+			elif args.has("--board"):
+				_show_leaderboard()
 			else:
 				_show_menu()
 			await get_tree().create_timer(3.0).timeout
@@ -473,27 +475,31 @@ func _show_leaderboard() -> void:
 	_screen = "leaderboard"
 	_stop_game()
 	var box := _panel_box()
-	_label("المتصدرين (حسب عدد الزومبي المقتولين)", 34, box, Color("#ffd23f"))
-	var list := _scroll(box)
-	_label("...", 22, list)
+	var sc := ScrollContainer.new()
+	sc.custom_minimum_size = Vector2(880, 560)
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(sc)
+	var board: Control = preload("res://scripts/leaderboard_view.gd").new()
+	board.font = font
+	board.me = player_name if online else ""
+	board.custom_minimum_size = Vector2(864, 260)
+	board.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	board.picked.connect(func(n: String): _show_profile(n))
+	sc.add_child(board)
 	_button("رجوع", _show_menu, box)
 	var rows = await supa.call_fn("leaderboard", {p_limit = 50})
-	if _screen != "leaderboard" or not is_instance_valid(list):
+	if _screen != "leaderboard" or not is_instance_valid(board):
 		return
-	for c in list.get_children():
-		c.queue_free()
 	if not (rows is Array):
-		_label("ما گدرت أجيب القائمة، تأكد من النت", 22, list, Color("#ff8a80"))
+		board.status = "ما گدرت أجيب القائمة، تأكد من النت"
+		board.queue_redraw()
 		return
-	if rows.is_empty():
-		_label("بعد محد لعب. كن الأول!", 22, list)
-	for r in rows:
-		var mine: bool = online and str(r.name).to_lower() == player_name.to_lower()
-		var t := "#%d   %s     %d زومبي     أعلى صعوبة %.1f" % [int(r.rank), r.name, int(r.kills), float(r.best_level)]
-		var col: Color = Color("#2f6fb3") if mine else ([Color("#b8860b"), Color("#7d7d85"), Color("#8b5a2b")][int(r.rank) - 1] if int(r.rank) <= 3 else Color(0, 0, 0, 0))
-		var b := _button(t, func(): _show_profile(str(r.name)), list, false, col)
-		b.custom_minimum_size = Vector2(740, 50)
-		b.add_theme_font_size_override("font_size", 21)
+	# للفحص بس: بيانات تجريبية حتى نشوف الشكل
+	if _shot != "" and (rows.is_empty() or OS.get_cmdline_user_args().has("--fake")):
+		rows = []
+		for i in 8:
+			rows.append({rank = i + 1, name = ["Aljizani", "حسين", "علي", "مصطفى", "زهراء", "Ahmed", "سجاد", "مريم"][i], kills = [1920, 1480, 1430, 1180, 780, 760, 530, 470][i], best_level = 12.4 - i})
+	board.set_rows(rows)
 
 
 # ════════ الملف الشخصي ════════
