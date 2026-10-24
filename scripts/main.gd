@@ -32,7 +32,6 @@ var _ended := false
 func _ready() -> void:
 	# خط Cairo العربي داخل اللعبة (المتصفح ما يعطي خطوط الجهاز)، وهو الخط الافتراضي بالمشروع كله
 	font = load("res://fonts/cairo_bold.tres")
-	print("text server: ", TextServerManager.get_primary_interface().get_name(), " | font ok: ", font != null, " | has alif: ", font.has_char(0x0627) if font else false)
 	_load()
 
 	scenery = preload("res://scripts/scenery.gd").new()
