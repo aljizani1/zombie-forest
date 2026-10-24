@@ -30,13 +30,8 @@ var _ended := false
 
 
 func _ready() -> void:
-	# خط Cairo العربي داخل اللعبة (المتصفح ما يعطي خطوط الجهاز)، بوزن عريض
-	var fv := FontVariation.new()
-	fv.base_font = load("res://fonts/Cairo.ttf")
-	fv.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("weight"): 700}
-	font = fv
-	ThemeDB.fallback_font = fv
-	ThemeDB.fallback_font_size = 22
+	# خط Cairo العربي داخل اللعبة (المتصفح ما يعطي خطوط الجهاز)، وهو الخط الافتراضي بالمشروع كله
+	font = load("res://fonts/cairo_bold.tres")
 	_load()
 
 	scenery = preload("res://scripts/scenery.gd").new()
@@ -206,7 +201,7 @@ func _show_menu() -> void:
 		if not owned.has(w):
 			text = "%s (%d)" % [cfg.name, cfg.price]
 		elif weapon == w:
-			text = "%s ✓" % cfg.name
+			text = "%s (مختار)" % cfg.name
 		else:
 			text = cfg.name
 		var b := _button(text, func(): _shop(w), shop, weapon == w)
