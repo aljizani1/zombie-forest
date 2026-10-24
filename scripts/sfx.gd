@@ -26,15 +26,9 @@ func _ready() -> void:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
 		_players.append(p)
-
-
-# نصنع الأصوات شوية شوية (صوت واحد كل إطار) حتى ما يصير تقطيع وقت اللعب
-func _process(_dt: float) -> void:
+	# نصنع كل الأصوات وقت التحميل (مو وقت اللعب) حتى ما يصير أي تقطيع
 	for name in SOUNDS:
-		if not _bank.has(name):
-			_fill(name)
-			return
-	set_process(false)
+		_fill(name)
 
 
 func _fill(name: String) -> void:

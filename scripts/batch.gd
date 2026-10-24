@@ -9,6 +9,9 @@ var parts: Array = [] # [verts, cols, idx] لكل دفعة مسجلة
 var verts := PackedVector2Array()
 var cols := PackedColorArray()
 var idx := PackedInt32Array()
+# مثلثات جاهزة بدون أرقام (كل 3 نقاط = مثلث): للأشكال المحفوظة مسبقاً، إضافتها ما تكلف شي
+var sverts := PackedVector2Array()
+var scols := PackedColorArray()
 
 
 func _init(ci: CanvasItem = null) -> void:
@@ -17,7 +20,7 @@ func _init(ci: CanvasItem = null) -> void:
 
 func _add(pts: PackedVector2Array, colors: PackedColorArray, tris: PackedInt32Array) -> void:
 	# الدفعة كبرت هواي: نرسمها ونبدي وحدة جديدة (حتى أرقام النقاط تبقى صغيرة)
-	if verts.size() > 50000:
+	if verts.size() > 50000 or sverts.size() > 0:
 		flush()
 	var base := verts.size()
 	verts.append_array(pts)
@@ -75,7 +78,7 @@ func draw_polyline(pts: PackedVector2Array, col: Color, w := 1.0, _aa := false) 
 	var n := pts.size()
 	if n < 2:
 		return
-	if verts.size() > 50000:
+	if verts.size() > 50000 or sverts.size() > 0:
 		flush()
 	var base := verts.size()
 	var h := w / 2
@@ -113,8 +116,35 @@ func draw_circle(c: Vector2, r: float, col: Color) -> void:
 	_add(pts, cc, t)
 
 
+# مثلثات جاهزة (من cache): بس نضيفها
+func soup(v: PackedVector2Array, c: PackedColorArray) -> void:
+	if idx.size() > 0 or sverts.size() > 60000:
+		flush()
+	sverts.append_array(v)
+	scols.append_array(c)
+
+
+# نحوّل المسجل لمثلثات جاهزة (مرة وحدة وقت الحفظ)
+func to_soup() -> Array:
+	flush()
+	var v := PackedVector2Array()
+	var c := PackedColorArray()
+	for part in parts:
+		var pv: PackedVector2Array = part[0]
+		var pc: PackedColorArray = part[1]
+		for i in part[2]:
+			v.append(pv[i])
+			c.append(pc[i])
+	return [v, c]
+
+
 # نرسم كل اللي تجمّع على العقدة (مرة وحدة)
 func flush() -> void:
+	if sverts.size():
+		if target != null:
+			RenderingServer.canvas_item_add_triangle_array(target.get_canvas_item(), PackedInt32Array(), sverts, scols)
+		sverts.clear()
+		scols.clear()
 	if idx.size():
 		if target == null:
 			parts.append([verts.duplicate(), cols.duplicate(), idx.duplicate()])

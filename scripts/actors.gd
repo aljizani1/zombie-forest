@@ -94,7 +94,7 @@ func _draw() -> void:
 		else:
 			if q.smoke:
 				col.a = minf(0.45, q.life / q.max * 0.6)
-			g.circle(Vector2(q.x, q.y), q.size, col)
+			_dot(Vector2(q.x, q.y), q.size, col)
 
 	# الفلوس اللي تطلع + هيدشوت (نرسم الأشكال أول حتى النص يطلع فوگها)
 	g.end()
@@ -200,7 +200,55 @@ func _draw_player(p: Game.Player, t: float) -> void:
 			_bar(cx, top + 6, 46, p.hp / p.max_hp, Color("#4fc3f7") if p.bot else Color("#7bd64a"))
 
 
-func _draw_zombie(z: Game.Zombie, t: float) -> void:
+# ── الزومبي: كل حركة (مشي، وقفة، ضربة، طيران...) تنرسم مرة وحدة وتنحفظ كمثلثات جاهزة،
+# وبعدها كل إطار بس ننقلها لمكان الزومبي. هذا يخلي رسم عشرات الزومبي شبه مجاني (سلاسة عالية).
+const WALK_F := 32 # عدد إطارات خطوة المشي
+const IDLE_F := 12
+const ATK_F := 10
+const FLY_F := 16
+var _zcache := {} # النوع|الحركة|الإطار ← [نقاط، ألوان]
+var _rec: Painter
+
+
+func _zframe(kind: String, mode: String, f: int) -> Array:
+	var key := "%s|%s|%d" % [kind, mode, f]
+	if _zcache.has(key):
+		return _zcache[key]
+	if _rec == null:
+		_rec = Painter.new(null)
+	_rec.begin()
+	var monster := kind == "monster"
+	match mode:
+		"walk":
+			var ph := float(f) / WALK_F * TAU
+			if monster:
+				Rig.draw_monster(_rec, ph, ph * 0.5, 0, true, 0)
+			else:
+				Rig.draw_zombie(_rec, kind, Rig.zombie_pose("walk", ph, ph * 0.5, 0), 0, ph * 0.5)
+		"idle":
+			var t := float(f) / IDLE_F * TAU / 1.7
+			if monster:
+				Rig.draw_monster(_rec, 0, t, 0, false, 0)
+			else:
+				Rig.draw_zombie(_rec, kind, Rig.zombie_pose("idle", 0, t, 0), 0, t)
+		"attack":
+			var atk := (f + 0.5) / ATK_F * 0.35
+			if monster:
+				Rig.draw_monster(_rec, 0, 0, atk, false, 0)
+			else:
+				Rig.draw_zombie(_rec, kind, Rig.zombie_pose("attack", 0, 0, atk), 0, 0)
+		"fly":
+			var t := float(f) / FLY_F * TAU / 9.0
+			Rig.draw_zombie(_rec, kind, Rig.zombie_pose("fly", 0, t, 0), 0, t)
+		_:
+			Rig.draw_zombie(_rec, kind, Rig.zombie_pose("air", 0, 0, 0), 0, 0)
+	var soup := _rec.b.to_soup()
+	_rec.b.parts.clear()
+	_zcache[key] = soup
+	return soup
+
+
+func _draw_zombie(z: Game.Zombie, _t: float) -> void:
 	var scale: float = Config.ZOMBIES[z.kind].scale
 	var cx := z.x + z.w / 2
 	var feet := z.y + z.h
@@ -212,20 +260,36 @@ func _draw_zombie(z: Game.Zombie, t: float) -> void:
 	if z.dead > 0:
 		_fall(z.dead)
 	var moving := absf(z.vx) > 8
+	var mode := "walk" if moving else "idle"
+	if z.dead > 0:
+		mode = "idle"
+	elif z.kind == "flyer":
+		mode = "fly"
+	elif not z.on_ground and z.kind != "monster":
+		mode = "air"
+	elif z.atk_t > 0:
+		mode = "attack"
+	var f := 0
+	match mode:
+		"walk":
+			f = int(posmod(z.phase, TAU) / TAU * WALK_F) % WALK_F
+		"idle":
+			f = int(posmod(game.time * 1.7 + z.id, TAU) / TAU * IDLE_F) % IDLE_F
+		"attack":
+			f = clampi(int((0.35 - z.atk_t) / 0.35 * ATK_F), 0, ATK_F - 1)
+		"fly":
+			f = int(posmod(game.time * 9 + z.id, TAU) / TAU * FLY_F) % FLY_F
+	var fr := _zframe(z.kind, mode, f if z.dead == 0 else 0)
+	var cols: PackedColorArray = fr[1]
+	# لمعة الضربة أو الاختفاء بعد الموت: نغيّر الألوان بس لهذا الزومبي
 	var flash := 0.7 if z.hurt > 0 else 0.0
-	if z.kind == "monster":
-		Rig.draw_monster(g, z.phase, t + z.id, 0.35 - z.atk_t if z.atk_t > 0 else 0.0, moving and z.dead == 0, flash)
-	else:
-		var mode := "walk" if moving else "idle"
-		if z.dead > 0:
-			mode = "idle"
-		elif z.kind == "flyer":
-			mode = "fly"
-		elif not z.on_ground:
-			mode = "air"
-		elif z.atk_t > 0:
-			mode = "attack"
-		Rig.draw_zombie(g, z.kind, Rig.zombie_pose(mode, z.phase, t + z.id, 0.35 - z.atk_t), flash, t + z.id)
+	if flash > 0 or g.alpha < 1:
+		cols = cols.duplicate()
+		for i in cols.size():
+			var c := cols[i].lerp(Color(1, 1, 1, cols[i].a), flash)
+			c.a *= g.alpha
+			cols[i] = c
+	g.b.soup(g.xf * (fr[0] as PackedVector2Array), cols)
 	g.alpha = 1.0
 	g.restore()
 	if z.dead == 0 and z.hp < z.max:
@@ -235,3 +299,20 @@ func _draw_zombie(z: Game.Zombie, t: float) -> void:
 
 func _seen(x: float) -> bool:
 	return x > _lo and x < _hi
+
+
+# دايرة صغيرة (دم، غبار، دخان) من قالب جاهز: أسرع بهواي من حساب دايرة كل مرة
+var _dot_v := PackedVector2Array()
+var _dot_c := PackedColorArray()
+
+
+func _dot(p: Vector2, r: float, col: Color) -> void:
+	if _dot_v.is_empty():
+		var n := 10
+		for i in n:
+			var a0 := TAU * i / n
+			var a1 := TAU * (i + 1) / n
+			_dot_v.append_array([Vector2.ZERO, Vector2(cos(a0), sin(a0)), Vector2(cos(a1), sin(a1))])
+		_dot_c.resize(_dot_v.size())
+	_dot_c.fill(col)
+	g.b.soup(Transform2D(0.0, Vector2(r, r), 0.0, p) * _dot_v, _dot_c)

@@ -12,8 +12,11 @@ const KEY := "sb_publishable_ogbKVgx1dCxJWvMTfZQI1g_HJHRcXmq"
 
 # يرجع الجواب (JSON) أو null إذا فشل
 func call_fn(fn: String, args: Dictionary) -> Variant:
+	if OS.has_feature("web"):
+		return await _web_call(fn, args)
 	var http := HTTPRequest.new()
 	http.timeout = 10
+	http.accept_gzip = false
 	add_child(http)
 	var err := http.request(URL + "/rest/v1/rpc/" + fn, PackedStringArray(["apikey: " + KEY, "Content-Type: application/json"]), HTTPClient.METHOD_POST, JSON.stringify(args))
 	if err != OK:
@@ -27,6 +30,40 @@ func call_fn(fn: String, args: Dictionary) -> Variant:
 	if txt == "" or txt == "null":
 		return true
 	return JSON.parse_string(txt)
+
+
+# بالمتصفح نستعمل fetch مال المتصفح نفسه (HTTPRequest مال Godot بالمتصفح يفشل لمن الجواب مضغوط)
+signal _web_done(id: int, text: Variant)
+var _web_ready := false
+var _web_cb: JavaScriptObject
+var _web_next := 0
+
+
+func _web_call(fn: String, args: Dictionary) -> Variant:
+	if not _web_ready:
+		_web_ready = true
+		JavaScriptBridge.eval("""
+			window.spCall = function (url, key, body, id, cb) {
+				fetch(url, {method: 'POST', headers: {apikey: key, 'Content-Type': 'application/json'}, body: body})
+					.then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+					.then(function (t) { cb(id, t); })
+					.catch(function () { cb(id, null); });
+			};
+		""", true)
+		_web_cb = JavaScriptBridge.create_callback(func(a: Array): _web_done.emit(int(a[0]), a[1]))
+	_web_next += 1
+	var id := _web_next
+	JavaScriptBridge.get_interface("window").spCall(URL + "/rest/v1/rpc/" + fn, KEY, JSON.stringify(args), id, _web_cb)
+	while true:
+		var res: Array = await _web_done
+		if res[0] == id:
+			var txt = res[1]
+			if txt == null:
+				return null
+			if txt == "" or txt == "null":
+				return true
+			return JSON.parse_string(str(txt))
+	return null
 
 
 func channel(name: String, presence_key: String) -> Channel:
