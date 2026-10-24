@@ -398,18 +398,26 @@ func _show_menu() -> void:
 	var r1 := _row(box)
 	_button("ابدأ", _start, r1, true)
 	_button("LAN (نفس الواي فاي)", _show_lan, r1, false, Color("#2f6fb3"))
+	_button("المتجر", _show_shop, r1, false, Color("#b8860b"))
 	var r2 := _row(box)
 	_button("المتصدرين", _show_leaderboard, r2, false, Color("#7a5a1e"))
 	if online:
 		_button("ملفي", func(): _show_profile(player_name), r2, false, Color("#3d6b35"))
-	if online:
-		_button("تبرع لصديق", _show_gift, r2, false, Color("#1f7a5c"))
 	_button("الإعدادات", _show_settings, r2)
 	if is_admin:
 		_button("لوحة الأدمن", _show_admin, r2, false, Color("#5b2a86"))
 
-	# المتجر
-	var shop := _row(box)
+
+
+# ════════ المتجر (الأسلحة، الطابوق، التبرع) ════════
+func _show_shop() -> void:
+	_screen = "shop"
+	_stop_game()
+	var box := _panel_box()
+	_label("المتجر", 48, box, Color("#ffd23f"))
+	_label("فلوسك: %d" % coins, 26, box, Color("#ffe9a8"))
+	_label("الأسلحة:", 24, box)
+	var guns := _row(box)
 	for w in Config.GUN_ORDER:
 		var cfg: Dictionary = Config.WEAPONS[w]
 		var text: String
@@ -419,16 +427,21 @@ func _show_menu() -> void:
 			text = "%s (مختار)" % cfg.name
 		else:
 			text = cfg.name
-		var b := _button(text, func(): _shop(w), shop, weapon == w)
-		b.custom_minimum_size = Vector2(200, 56)
+		var b := _button(text, func(): _shop(w), guns, weapon == w)
+		b.custom_minimum_size = Vector2(210, 56)
 		b.disabled = not owned.has(w) and coins < cfg.price
-	var bb := _button("طابوق +10 (%d)   عندك %d" % [BRICK_PRICE, bricks], func():
+	_label("للبناء:", 24, box)
+	var bb := _button("طابوق +10 (%d فلوس)   -   عندك %d" % [BRICK_PRICE, bricks], func():
 		if await _spend(BRICK_PRICE):
 			bricks += 10
 			_save()
-			_show_menu(), shop, false, Color("#8a4a24"))
-	bb.custom_minimum_size = Vector2(280, 56)
+			_show_shop(), box, false, Color("#8a4a24"))
+	bb.custom_minimum_size = Vector2(420, 56)
 	bb.disabled = coins < BRICK_PRICE
+	if online:
+		var g := _button("تبرع لصديق", _show_gift, box, false, Color("#1f7a5c"))
+		g.custom_minimum_size = Vector2(420, 56)
+	_button("رجوع", _show_menu, box)
 
 
 func _shop(w: String) -> void:
@@ -439,7 +452,7 @@ func _shop(w: String) -> void:
 		owned.append(w)
 	weapon = w
 	_save()
-	_show_menu()
+	_show_shop()
 
 
 # نصرف من الفلوس (بالحساب إذا داخل، لو لا من الجهاز)
@@ -1024,7 +1037,7 @@ func _show_gift(msg := "", query := "") -> void:
 	search.text_submitted.connect(func(t: String): _show_gift("", t.strip_edges()))
 	var list := _scroll(box, 300, 760)
 	_label("...", 22, list)
-	_button("رجوع", _show_menu, box)
+	_button("رجوع", _show_shop, box)
 	var rows = await supa.call_fn("list_players", {p_query = query})
 	if _screen != "gift" or not is_instance_valid(list):
 		return

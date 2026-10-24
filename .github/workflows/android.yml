@@ -65,6 +65,19 @@ jobs:
           ./godot --headless --export-release "Web" build/web/index.html
           mkdir -p web/play
           cp -r build/web/* web/play/
+          # نسخة جديدة بكل بناء: ملف اللعبة يتحمّل برقم جديد حتى المتصفح ما يستعمل القديم
+          sed -i "s|\"executable\":\"index\"|\"executable\":\"index\",\"mainPack\":\"index.pck?v=${GITHUB_SHA::8}\"|" web/play/index.html
+          sed -i "s|src=\"index.js\"|src=\"index.js?v=${GITHUB_SHA::8}\"|" web/play/index.html
+          # الأجهزة اللي عندها النسخة القديمة محفوظة (service worker): هذا الملف يمسحها ويحدّث الصفحة
+          cat > web/play/index.service.worker.js <<'EOF'
+          self.addEventListener('install', () => self.skipWaiting());
+          self.addEventListener('activate', (e) => e.waitUntil((async () => {
+            for (const k of await caches.keys()) await caches.delete(k);
+            await self.registration.unregister();
+            for (const c of await self.clients.matchAll({ type: 'window' })) c.navigate(c.url);
+          })()));
+          EOF
+          grep -o '"mainPack":"[^"]*"' web/play/index.html
           ls -la web/play
 
       - name: Publish release
