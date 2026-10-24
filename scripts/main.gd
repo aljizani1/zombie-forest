@@ -72,7 +72,8 @@ func _ready() -> void:
 		if args.has("--stage"):
 			stage = int(args[args.find("--stage") + 1])
 		if args.has("--menu"):
-			await get_tree().create_timer(1.5).timeout
+			await get_tree().create_timer(3.0).timeout
+			print("menu fps=", Engine.get_frames_per_second())
 			get_viewport().get_texture().get_image().save_png(_shot)
 			get_tree().quit()
 			return
@@ -91,7 +92,7 @@ func _auto_play(delta: float) -> void:
 	if fmod(_shot_t, 1.5) < delta:
 		inp.jump = 0.15
 	if _shot_t > 8.0:
-		print("HUD size=", hud.size, " pos=", hud.position, " vp=", get_viewport().get_visible_rect().size, " touch=", touch.size)
+		print("fps=", Engine.get_frames_per_second(), " zombies=", game.zs.size())
 		get_viewport().get_texture().get_image().save_png(_shot)
 		get_tree().quit()
 

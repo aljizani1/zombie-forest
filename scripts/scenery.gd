@@ -1,12 +1,14 @@
 # ════════ رسم الطبيعة (السما، الغيوم، الجبال، الغابة، الأرض، المنصات، الأشجار) ════════
 # - السما ثابتة بالشاشة، والغيوم والجبال طبقات Parallax2D تتحرك أبطأ من الكاميرا (عمق).
-# - الأرض والأشجار والمنصات تنرسم مرة وحدة بقطع (chunk)، والـ Godot يرسم بس القطع الظاهرة.
+# - كل شي ثابت ينرسم مرة وحدة على صورة (SubViewport) وبعدها نعرض الصورة بس: رسمها ما يكلف شي.
+# - الأرض بقطع (chunk): نخلي بس الصور القريبة من الكاميرا بالذاكرة (التلفون بالمتصفح ذاكرته محدودة).
 extends Node2D
 
 const DRAWN := preload("res://scripts/drawn.gd")
 const CHUNK := 1024.0
 const STRIP := 2048.0
 const AH := 720.0
+const NEAR := 2 # كم قطعة نخلي يمين ويسار الكاميرا
 
 const LEAF := {
 	"oak": [Color("#2f6a2c"), Color("#4a9436"), Color("#6cb845"), Color("#9fd768")],
@@ -16,6 +18,8 @@ const LEAF := {
 
 var map: World
 var _sky: Node2D
+var _chunks: Array = [] # لكل قطعة: {back, front} (الرسم المسجل)
+var _baked := {} # رقم القطعة ← العقد (صور + SubViewport)
 
 
 static func V(x: float, y: float) -> Vector2:
@@ -32,11 +36,51 @@ static func rng(s: int) -> RandomNumberGenerator:
 	return r
 
 
+# عقدة ترسم نفسها مباشرة (للأشياء الصغيرة)
 func _node(parent: Node, fn: Callable) -> Node2D:
 	var n: Node2D = DRAWN.new()
-	n.fn = fn
+	n.fn = func(ci: CanvasItem) -> void:
+		var b := Batch.new(ci)
+		fn.call(b)
+		b.flush()
 	parent.add_child(n)
 	return n
+
+
+# نسجل الرسم (بدون ما نرسم) ونحسب حدوده
+func _record(fn: Callable) -> Dictionary:
+	var b := Batch.new()
+	fn.call(b)
+	b.flush()
+	if b.parts.is_empty():
+		return {}
+	var r := b.bounds()
+	r.end = Vector2(r.end.x, minf(r.end.y, AH + 8)) # تحت الشاشة ما يبين
+	return {parts = b.parts, rect = r}
+
+
+# نرسم المسجل على صورة مرة وحدة، ونرجع [SubViewport, Sprite2D]
+func _bake(rec: Dictionary, parent: Node, z: int, rect := Rect2()) -> Array:
+	if rec.is_empty():
+		return []
+	var r: Rect2 = rect if rect.size != Vector2.ZERO else Rect2(rec.rect.position.floor() - V(1, 1), rec.rect.size.ceil() + V(2, 2))
+	var vp := SubViewport.new()
+	vp.size = Vector2i(maxi(1, ceili(r.size.x)), maxi(1, ceili(r.size.y)))
+	vp.transparent_bg = true
+	vp.disable_3d = true
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	var n: Node2D = DRAWN.new()
+	n.position = -r.position
+	n.fn = func(ci: CanvasItem) -> void: Batch.play(ci, rec.parts)
+	vp.add_child(n)
+	add_child(vp)
+	var spr := Sprite2D.new()
+	spr.texture = vp.get_texture()
+	spr.centered = false
+	spr.position = r.position
+	spr.z_index = z
+	parent.add_child(spr)
+	return [vp, spr]
 
 
 func setup(m: World) -> void:
@@ -55,40 +99,52 @@ func setup(m: World) -> void:
 	_parallax(0.5, Vector2.ZERO, _draw_forest)
 
 	# ── ظلمة الحفر ──
-	_node(self, func(ci: CanvasItem) -> void:
+	var abyss := _node(self, func(ci) -> void:
 		_vgrad(ci, 0, map.width, AH - 90, AH + 400, [Color(0.08, 0.05, 0.04, 0), Color(0.08, 0.05, 0.04, 0.85), Color(0.08, 0.05, 0.04, 0.95)], [0.0, 0.25, 1.0]))
+	abyss.z_index = -1
 
 	# ── قطع الأرض (كل شي ينحط بالقطعة اللي بيها نصه) ──
 	var n := ceili(map.width / CHUNK)
-	var layers := {trees = [], ground = [], plats = [], decor = []}
-	for k in layers:
-		for i in n:
-			layers[k].append([])
+	var lists := []
+	for i in n:
+		lists.append({trees = [], ground = [], plats = [], decor = []})
 	var ci_of := func(x: float) -> int: return clampi(int(x / CHUNK), 0, n - 1)
 	for t in map.trees:
-		layers.trees[ci_of.call(t.x)].append(t)
+		lists[ci_of.call(t.x)].trees.append(t)
 	for b in map.ground:
-		layers.ground[ci_of.call((b.x0 + b.x1) / 2)].append(b)
+		lists[ci_of.call((b.x0 + b.x1) / 2)].ground.append(b)
 	for p in map.platforms:
-		layers.plats[ci_of.call((p.x0 + p.x1) / 2)].append(p)
+		lists[ci_of.call((p.x0 + p.x1) / 2)].plats.append(p)
 	for d in map.decor:
-		layers.decor[ci_of.call(d.x)].append(d)
-	for i in n:
-		var list: Array = layers.trees[i]
-		if list.size():
-			_node(self, func(ci): for t in list: draw_tree(ci, t.x, t.y + 6, t.kind, t.size, seed_of(t.x, t.y, 17)))
-	for i in n:
-		var list: Array = layers.ground[i]
-		if list.size():
-			_node(self, func(ci): for b in list: _draw_ground(ci, b))
-	for i in n:
-		var list: Array = layers.plats[i]
-		if list.size():
-			_node(self, func(ci): for p in list: _draw_platform(ci, p))
-	for i in n:
-		var list: Array = layers.decor[i]
-		if list.size():
-			_node(self, func(ci): for d in list: draw_decor(ci, d.kind, d.x, d.y, seed_of(d.x, d.y, 5)))
+		lists[ci_of.call(d.x)].decor.append(d)
+	for L in lists:
+		# الأشجار ورا، والأرض والمنصات والزينة قدّام
+		_chunks.append({
+			back = _record(func(ci): for t in L.trees: draw_tree(ci, t.x, t.y + 6, t.kind, t.size, seed_of(t.x, t.y, 17))),
+			front = _record(func(ci):
+				for b in L.ground: _draw_ground(ci, b)
+				for p in L.plats: _draw_platform(ci, p)
+				for d in L.decor: draw_decor(ci, d.kind, d.x, d.y, seed_of(d.x, d.y, 5))),
+		})
+
+
+# نخلي بس القطع القريبة من الكاميرا مرسومة
+func _process(_dt: float) -> void:
+	if _chunks.is_empty():
+		return
+	var cam := get_viewport().get_camera_2d()
+	if cam == null:
+		return
+	var c := int(cam.get_screen_center_position().x / CHUNK)
+	for i in _baked.keys():
+		if absi(i - c) > NEAR:
+			for node in _baked[i]:
+				node.queue_free()
+			_baked.erase(i)
+	for i in range(c - NEAR, c + NEAR + 1):
+		if i < 0 or i >= _chunks.size() or _baked.has(i):
+			continue
+		_baked[i] = _bake(_chunks[i].back, self, -2) + _bake(_chunks[i].front, self, 0)
 
 
 func _parallax(f: float, auto: Vector2, fn: Callable) -> void:
@@ -99,12 +155,17 @@ func _parallax(f: float, auto: Vector2, fn: Callable) -> void:
 	p.autoscroll = auto
 	p.z_index = -5
 	add_child(p)
-	_node(p, fn)
+	var rec := _record(fn)
+	if rec.is_empty():
+		return
+	# الصورة بعرض الشريط بالضبط حتى تتكرر بدون فراغات
+	var top: float = floorf(rec.rect.position.y) - 1
+	_bake(rec, p, 0, Rect2(0, top, STRIP, rec.rect.end.y - top + 1))
 
 
 # ── أدوات رسم ──
 # تدرّج عمودي على مستطيل (ألوان على نقاط)
-static func _vgrad(ci: CanvasItem, x0: float, x1: float, y0: float, y1: float, cols: Array, stops: Array) -> void:
+static func _vgrad(ci, x0: float, x1: float, y0: float, y1: float, cols: Array, stops: Array) -> void:
 	for i in cols.size() - 1:
 		var a := lerpf(y0, y1, stops[i])
 		var b := lerpf(y0, y1, stops[i + 1])
@@ -112,7 +173,7 @@ static func _vgrad(ci: CanvasItem, x0: float, x1: float, y0: float, y1: float, c
 
 
 # دايرة بتدرّج (نقطة الضوء مزاحة لفوگ يسار)
-static func disc(ci: CanvasItem, c: Vector2, r: float, inner: Color, outer: Color, n := 14) -> void:
+static func disc(ci, c: Vector2, r: float, inner: Color, outer: Color, n := 14) -> void:
 	var f := c + V(-r * 0.35, -r * 0.4)
 	var pts := PackedVector2Array([f])
 	var cols := PackedColorArray([inner])
@@ -124,12 +185,12 @@ static func disc(ci: CanvasItem, c: Vector2, r: float, inner: Color, outer: Colo
 		ci.draw_polygon(PackedVector2Array([pts[0], pts[i + 1], pts[i + 2]]), PackedColorArray([cols[0], cols[i + 1], cols[i + 2]]))
 
 
-static func ellipse(ci: CanvasItem, c: Vector2, rx: float, ry: float, rot: float, col: Color, n := 10) -> void:
+static func ellipse(ci, c: Vector2, rx: float, ry: float, rot: float, col: Color, n := 10) -> void:
 	ci.draw_colored_polygon(Painter.ellipse_pts(c, rx, ry, rot, n), col)
 
 
 # ── السما + الشمس ──
-func _draw_sky(ci: CanvasItem) -> void:
+func _draw_sky(ci) -> void:
 	var s := get_viewport().get_visible_rect().size
 	_vgrad(ci, 0, s.x, 0, s.y, [Color("#3d84c6"), Color("#7dbbe5"), Color("#cbe7f1"), Color("#e8f3e4")], [0.0, 0.5, 0.85, 1.0])
 	var sun := V(s.x * 0.8, s.y * 0.1)
@@ -148,7 +209,7 @@ func _draw_sky(ci: CanvasItem) -> void:
 
 
 # ── الغيوم ──
-func _draw_clouds(ci: CanvasItem) -> void:
+func _draw_clouds(ci) -> void:
 	var r := rng(5)
 	for i in ceili(STRIP / 260):
 		var cx := (i + r.randf() * 0.6) * 260
@@ -178,7 +239,7 @@ static func ridge(base: float, amp: float, s: int, step: float) -> PackedVector2
 
 
 # الجبل كشرائط عمودية (حتى التدرّج يكون مضبوط والمضلع ما يتعقد)
-static func fill_ridge(ci: CanvasItem, pts: PackedVector2Array, top: Color, bottom: Color, y_top: float, y_bot: float, snow := false) -> void:
+static func fill_ridge(ci, pts: PackedVector2Array, top: Color, bottom: Color, y_top: float, y_bot: float, snow := false) -> void:
 	var col_at := func(y: float) -> Color: return top.lerp(bottom, clampf((y - y_top) / (y_bot - y_top), 0, 1))
 	for i in pts.size() - 1:
 		var a := pts[i]
@@ -196,16 +257,16 @@ static func fill_ridge(ci: CanvasItem, pts: PackedVector2Array, top: Color, bott
 					PackedColorArray([Color(0.98, 0.99, 1, sa), Color(0.98, 0.99, 1, sb), Color(0.98, 0.99, 1, 0), Color(0.98, 0.99, 1, 0)]))
 
 
-func _draw_far(ci: CanvasItem) -> void:
+func _draw_far(ci) -> void:
 	fill_ridge(ci, ridge(470, 260, 3, 10), Color("#8fa9c2"), Color("#c8d9e4"), 210, 520, true)
 
 
-func _draw_mid(ci: CanvasItem) -> void:
+func _draw_mid(ci) -> void:
 	fill_ridge(ci, ridge(530, 190, 8, 8), Color("#6e9a84"), Color("#a9c8b6"), 340, 560)
 	_vgrad(ci, 0, STRIP, 420, AH + 300, [Color(0.88, 0.93, 0.93, 0), Color(0.88, 0.93, 0.93, 0.45), Color(0.88, 0.93, 0.93, 0.45)], [0.0, 0.33, 1.0])
 
 
-func _draw_forest(ci: CanvasItem) -> void:
+func _draw_forest(ci) -> void:
 	var r := rng(11)
 	for row in 2:
 		var base_y := 575.0 + row * 22
@@ -229,7 +290,7 @@ func _draw_forest(ci: CanvasItem) -> void:
 
 
 # ── الأشجار والزينة ──
-static func leaf_clump(ci: CanvasItem, x: float, y: float, r: float, pal: Array, rnd: RandomNumberGenerator) -> void:
+static func leaf_clump(ci, x: float, y: float, r: float, pal: Array, rnd: RandomNumberGenerator) -> void:
 	disc(ci, V(x, y), r, pal[3], pal[0], 14)
 	var n := roundi(r * 0.4)
 	for i in n:
@@ -243,7 +304,7 @@ static func leaf_clump(ci: CanvasItem, x: float, y: float, r: float, pal: Array,
 		ellipse(ci, V(lx, ly), 2.6, 1.5, rnd.randf() * PI, col, 6)
 
 
-static func draw_tree(ci: CanvasItem, x: float, base: float, kind: String, size: float, s: int) -> void:
+static func draw_tree(ci, x: float, base: float, kind: String, size: float, s: int) -> void:
 	var rnd := rng(s)
 	var pal: Array = LEAF[kind]
 	if kind == "pine":
@@ -306,7 +367,7 @@ static func draw_tree(ci: CanvasItem, x: float, base: float, kind: String, size:
 		leaf_clump(ci, cl.x, cl.y, cl.z, pal, rnd)
 
 
-static func draw_decor(ci: CanvasItem, kind: String, x: float, y: float, s: int) -> void:
+static func draw_decor(ci, kind: String, x: float, y: float, s: int) -> void:
 	var r := rng(s)
 	match kind:
 		"bush":
@@ -359,7 +420,7 @@ static func draw_decor(ci: CanvasItem, kind: String, x: float, y: float, s: int)
 
 # ── التراب والعشب ──
 # عشب: شفرات منحنية
-static func blades(ci: CanvasItem, x0: float, x1: float, y: float, rnd: RandomNumberGenerator, density: float, h_max: float) -> void:
+static func blades(ci, x0: float, x1: float, y: float, rnd: RandomNumberGenerator, density: float, h_max: float) -> void:
 	var cols := [Color("#4e9a30"), Color("#62b03b"), Color("#78c34a"), Color("#91d45e"), Color("#3f8a2a")]
 	var x := x0
 	while x < x1:
@@ -370,7 +431,7 @@ static func blades(ci: CanvasItem, x0: float, x1: float, y: float, rnd: RandomNu
 
 
 # بقع وحجار بالتراب (بس داخل المضلع: نعطيه دالة تقول الحد السفلي عند x)
-static func soil_bits(ci: CanvasItem, x0: float, x1: float, top: float, bottom_at: Callable, rnd: RandomNumberGenerator) -> void:
+static func soil_bits(ci, x0: float, x1: float, top: float, bottom_at: Callable, rnd: RandomNumberGenerator) -> void:
 	var area := (x1 - x0) * 160
 	for i in int(area / 700):
 		var x := x0 + rnd.randf() * (x1 - x0)
@@ -397,7 +458,7 @@ static func soil_bits(ci: CanvasItem, x0: float, x1: float, top: float, bottom_a
 
 
 # شريط العشب فوق التراب
-static func grass_top(ci: CanvasItem, x0: float, x1: float, top: float, rnd: RandomNumberGenerator) -> void:
+static func grass_top(ci, x0: float, x1: float, top: float, rnd: RandomNumberGenerator) -> void:
 	var x := x0
 	while x < x1:
 		var nx := minf(x + 8, x1)
@@ -408,7 +469,7 @@ static func grass_top(ci: CanvasItem, x0: float, x1: float, top: float, rnd: Ran
 		x = nx
 
 
-func _draw_ground(ci: CanvasItem, b: Dictionary) -> void:
+func _draw_ground(ci, b: Dictionary) -> void:
 	var r := rng(seed_of(b.x0, b.x1, b.y))
 	_vgrad(ci, b.x0, b.x1, b.y, AH + 300, [Color("#74502f"), Color("#56391f"), Color("#2b1b10"), Color("#2b1b10")], [0.0, 0.12, 0.35, 1.0])
 	soil_bits(ci, b.x0, b.x1, b.y, func(_x): return AH + 40, r)
@@ -430,7 +491,7 @@ func _draw_ground(ci: CanvasItem, b: Dictionary) -> void:
 	blades(ci, b.x0, b.x1, b.y, r, 2.6, 16)
 
 
-func _draw_platform(ci: CanvasItem, p: Dictionary) -> void:
+func _draw_platform(ci, p: Dictionary) -> void:
 	# ظل المنصة على الأرض
 	var cx: float = (p.x0 + p.x1) / 2
 	var gy = map.ground_at(cx)

@@ -1,6 +1,7 @@
 # ════════ أداة الرسم ════════
 # تشبه رسم الـ Canvas بالنسخة القديمة: save/restore/translate/rotate/scale وأشكال بتظليل.
 # التظليل يصير بألوان على رؤوس المضلع (الضوء جاي من فوگ يسار)، فالـ GPU يرسمه بسرعة.
+# كل الأشكال تتجمع بدفعة وحدة (Batch) والتحويل (translate/rotate) يصير هنا، وبالآخر end() يرسمها مرة وحدة.
 class_name Painter
 extends RefCounted
 
@@ -9,6 +10,7 @@ const OL := 2.2
 const LIGHT_DIR := Vector2(-0.6, -0.8)
 
 var ci: CanvasItem
+var b: Batch
 var xf := Transform2D.IDENTITY
 var _stack: Array[Transform2D] = []
 var alpha := 1.0
@@ -19,6 +21,7 @@ var flash_to := Color.WHITE
 
 func _init(item: CanvasItem) -> void:
 	ci = item
+	b = Batch.new(item)
 
 
 func begin() -> void:
@@ -26,7 +29,11 @@ func begin() -> void:
 	_stack.clear()
 	alpha = 1.0
 	flash = 0.0
-	ci.draw_set_transform_matrix(xf)
+
+
+# نرسم كل اللي تجمّع (لازم قبل أي كتابة نص حتى النص يطلع فوگ)
+func end() -> void:
+	b.flush()
 
 
 func save() -> void:
@@ -35,22 +42,18 @@ func save() -> void:
 
 func restore() -> void:
 	xf = _stack.pop_back()
-	ci.draw_set_transform_matrix(xf)
 
 
 func translate(x: float, y: float) -> void:
 	xf = xf * Transform2D(0.0, Vector2(x, y))
-	ci.draw_set_transform_matrix(xf)
 
 
 func rotate(a: float) -> void:
 	xf = xf * Transform2D(a, Vector2.ZERO)
-	ci.draw_set_transform_matrix(xf)
 
 
 func scale(sx: float, sy: float) -> void:
 	xf = xf * Transform2D.IDENTITY.scaled(Vector2(sx, sy))
-	ci.draw_set_transform_matrix(xf)
 
 
 # ── ألوان ──
@@ -70,7 +73,7 @@ static func dark(col: Color, k := 0.35) -> Color:
 
 # ── منحنيات ──
 # نقاط منحنى تربيعي من a إلى b (بدون a)
-static func quad(pts: PackedVector2Array, ctrl: Vector2, b: Vector2, n := 6) -> void:
+static func quad(pts: PackedVector2Array, ctrl: Vector2, b: Vector2, n := 4) -> void:
 	var a := pts[pts.size() - 1]
 	for i in range(1, n + 1):
 		var t := float(i) / n
@@ -139,67 +142,51 @@ func fill(pts: PackedVector2Array, col: Color) -> void:
 		tris(pts, cols)
 
 
-# نقسّم المضلع مثلثات بأنفسنا؛ إذا الشكل متداخل (نادر بالأنيميشن) نرسم الغلاف المحدّب بداله
+# المضلع ينحوّل للمكان الحالي (translate/rotate/scale) وينضاف للدفعة
 func tris(pts: PackedVector2Array, cols: PackedColorArray) -> void:
-	var idx := Geometry2D.triangulate_polygon(pts)
-	if idx.is_empty():
-		var hull := Geometry2D.convex_hull(pts)
-		if hull.size() < 4:
-			return
-		hull.remove_at(hull.size() - 1)
-		var hc := PackedColorArray()
-		for p in hull:
-			hc.append(cols[_nearest(pts, p)])
-		pts = hull
-		cols = hc
-		idx = Geometry2D.triangulate_polygon(pts)
-		if idx.is_empty():
-			return
-	RenderingServer.canvas_item_add_triangle_array(ci.get_canvas_item(), idx, pts, cols)
+	b.draw_polygon(xf * pts, cols)
 
 
-static func _nearest(pts: PackedVector2Array, p: Vector2) -> int:
-	for i in pts.size():
-		if pts[i].is_equal_approx(p):
-			return i
-	return 0
+# سمك الخط بعد التكبير/التصغير
+func _w(w: float) -> float:
+	return w * sqrt(absf(xf.determinant()))
 
 
 func line_loop(pts: PackedVector2Array, col: Color, w: float) -> void:
-	var closed := pts.duplicate()
-	closed.append(pts[0])
-	ci.draw_polyline(closed, c(col), w, true)
+	var closed := xf * pts
+	closed.append(closed[0])
+	b.draw_polyline(closed, c(col), _w(w))
 
 
-func line(a: Vector2, b: Vector2, col: Color, w: float) -> void:
-	ci.draw_line(a, b, c(col), w, true)
+func line(p0: Vector2, p1: Vector2, col: Color, w: float) -> void:
+	b.draw_line(xf * p0, xf * p1, c(col), _w(w))
 
 
 func polyline(pts: PackedVector2Array, col: Color, w: float) -> void:
 	if pts.size() >= 2:
-		ci.draw_polyline(pts, c(col), w, true)
+		b.draw_polyline(xf * pts, c(col), _w(w))
 
 
 func circle(center: Vector2, r: float, col: Color) -> void:
-	ci.draw_circle(center, r, c(col))
+	fill(ellipse_pts(center, r, r, 0.0, clampi(int(r * 0.8), 8, 20)), col)
 
 
 # دايرة بتظليل
 func blob(center: Vector2, r: float, base: Color, outline := true) -> void:
-	shade(ellipse_pts(center, r, r, 0.0, 16), base, outline)
+	shade(ellipse_pts(center, r, r, 0.0, 12), base, outline)
 
 
-# توهج: لون بالنص ويختفي للأطراف
+# توهج: لون بالنص ويختفي للأطراف (مروحة مثلثات)
 func glow(center: Vector2, r: float, inner: Color, outer: Color, n := 20) -> void:
 	var pts := PackedVector2Array([center])
 	var cols := PackedColorArray([c(inner)])
-	for i in n + 1:
+	var t := PackedInt32Array()
+	for i in n:
 		var a := TAU * i / n
 		pts.append(center + Vector2(cos(a), sin(a)) * r)
 		cols.append(c(outer))
-	# مروحة مثلثات
-	for i in n:
-		ci.draw_polygon(PackedVector2Array([pts[0], pts[i + 1], pts[i + 2]]), PackedColorArray([cols[0], cols[i + 1], cols[i + 2]]))
+		t.append_array([0, i + 1, (i + 1) % n + 1])
+	b._add(xf * pts, cols, t)
 
 
 # طرف (ذراع/رجل) بشكل كبسولة مظللة
@@ -207,6 +194,6 @@ func limb(a: Vector2, b: Vector2, w1: float, w2: float, base: Color) -> void:
 	var d := b - a
 	var ang := d.angle()
 	var pts := PackedVector2Array()
-	arc_pts(pts, b, w2 / 2, ang - PI / 2, ang + PI / 2, 5)
-	arc_pts(pts, a, w1 / 2, ang + PI / 2, ang + PI * 1.5, 5)
+	arc_pts(pts, b, w2 / 2, ang - PI / 2, ang + PI / 2, 4)
+	arc_pts(pts, a, w1 / 2, ang + PI / 2, ang + PI * 1.5, 4)
 	shade(pts, base)

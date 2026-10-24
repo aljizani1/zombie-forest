@@ -42,7 +42,9 @@ func _draw() -> void:
 	# الطلق
 	for b in game.bullets:
 		var tail := Vector2(b.x - b.vx * 0.03, b.y - b.vy * 0.03)
-		draw_polyline_colors(PackedVector2Array([tail, Vector2(b.x, b.y)]), PackedColorArray([Color(1, 0.78, 0.31, 0), Color(1, 0.96, 0.78, 1)]), 3, true)
+		var n := Vector2(-b.vy, b.vx).normalized() * 1.5
+		var head := Vector2(b.x, b.y)
+		g.b.draw_polygon(PackedVector2Array([tail + n, head + n, head - n, tail - n]), PackedColorArray([Color(1, 0.78, 0.31, 0), Color(1, 0.96, 0.78, 1), Color(1, 0.96, 0.78, 1), Color(1, 0.78, 0.31, 0)]))
 
 	# الرمانات
 	for gr in game.grenades:
@@ -71,9 +73,10 @@ func _draw() -> void:
 		else:
 			if q.smoke:
 				col.a = minf(0.45, q.life / q.max * 0.6)
-			draw_circle(Vector2(q.x, q.y), q.size, col)
+			g.circle(Vector2(q.x, q.y), q.size, col)
 
-	# الفلوس اللي تطلع + هيدشوت
+	# الفلوس اللي تطلع + هيدشوت (نرسم الأشكال أول حتى النص يطلع فوگها)
+	g.end()
 	for q in game.pops:
 		var a := minf(1.0, q.life * 2)
 		if q.head:
@@ -152,8 +155,12 @@ func _draw_player(p: Game.Player, t: float) -> void:
 	# حلقة تبديل المخزن فوگ الراس
 	if rl > 0:
 		var rc := Vector2(cx, p.y - (52 if p.bot else 26))
-		draw_arc(rc, 11, 0, TAU, 24, Color(0, 0, 0, 0.55), 4, true)
-		draw_arc(rc, 11, -PI / 2, -PI / 2 + rl * TAU, 24, Color("#ffd23f"), 4, true)
+		var ring := PackedVector2Array()
+		Painter.arc_pts(ring, rc, 11, 0, TAU, 24)
+		g.polyline(ring, Color(0, 0, 0, 0.55), 4)
+		ring.clear()
+		Painter.arc_pts(ring, rc, 11, -PI / 2, -PI / 2 + rl * TAU, 24)
+		g.polyline(ring, Color("#ffd23f"), 4)
 
 	# وميض الطلقة
 	if p.flash > 0 and p.hp > 0 and p.weapon != "grenade":
@@ -165,6 +172,7 @@ func _draw_player(p: Game.Player, t: float) -> void:
 
 	if p.bot:
 		var top := p.y - 268 if p.chute else p.y - 22
+		g.end()
 		_text(p.name, Vector2(cx, top), 15, Color.WHITE, Color(0, 0, 0, 0.7))
 		if p.hp > 0:
 			_bar(cx, top + 6, 46, p.hp / p.max_hp, Color("#4fc3f7"))
