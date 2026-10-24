@@ -1,5 +1,7 @@
 # ════════ منطق اللعبة ════════
 # الحركة، الطلق، الرمانات، الزومبي (العادي والطاير والوحش)، البوت المساعد، والمراحل. ما بيه أي رسم.
+# باللعب الجماعي: المضيف (authority) هو اللي يحرّك الزومبي ويحسب الضرب والقتل،
+# والباقين يحرّكون لاعبهم بس ويستلمون الباقي من المضيف (snapshot).
 class_name Game
 extends RefCounted
 
@@ -45,8 +47,11 @@ class Player extends Body:
 	var reload := 0.0
 	var grenades := 0
 	var g_cd := 0.0
+	var g_throws := 0 # عداد الرمانات (حتى الباقين يعرفون إنك رميت)
+	var g_seen := 0
 	var dead := 0.0
 	var safe := Vector2.ZERO # آخر مكان آمن (إذا وگع بحفرة يرجع له)
+	var net = null # آخر حالة وصلت من الشبكة {x, y, vx, vy, at}
 
 
 class Zombie extends Body:
@@ -65,6 +70,7 @@ class Zombie extends Body:
 	var air := 0.0
 	var phase := 0.0
 	var aim := 0.0
+	var net = null
 
 
 class Bullet:
@@ -129,7 +135,11 @@ var total := 0
 var spawned := 0
 var killed := 0
 var spawn_cd := 1.5
-var coins := 0
+var credits := {} # فلوس كل لاعب (حسب الـ id)
+var authority := true # المضيف (أو لعب لوحدك)
+var networked := false
+var me_id := "me"
+var kills: Array = [] # قتلات جديدة لازم تنرسل بالسنابشوت الجاي
 var status := "play" # play / won / lost
 var end_t := 0.0
 var owned: Array = ["pistol"]
@@ -139,33 +149,45 @@ var helper_at = null # متى ينزل البوت (نسبة القتل)، null =
 var plane = null # {x, y, dir, drop_x, dropped}
 
 
-func _init(m: World, stage_i: int, owned_list: Array, weapon: String) -> void:
+# who = {id, name, uniform} للاعب المحلي، net = لعب جماعي، slot = ترتيبه (حتى ما يطلعون فوگ بعض)
+func _init(m: World, stage_i: int, owned_list: Array, weapon: String, who := {}, is_authority := true, net := false, slot := 0) -> void:
 	map = m
 	stage = stage_i
 	owned = owned_list
+	authority = is_authority
+	networked = net
 	total = Config.STAGES[stage].total
-	var me := _make_player("me", "أنا", Color("#8a7d4f"), weapon if owned.has(weapon) else "pistol")
-	me.local = true
-	players.append(me)
-	helper_at = randf_range(HELPER.at[0], HELPER.at[1]) if randf() < HELPER.chance else null
+	me_id = who.get("id", "me")
+	var mine := _make_player(me_id, who.get("name", "أنا"), who.get("uniform", Color("#8a7d4f")), weapon if owned.has(weapon) else "pistol", slot)
+	mine.local = true
+	players.append(mine)
+	# البوت المساعد بس باللعب لوحدك
+	helper_at = randf_range(HELPER.at[0], HELPER.at[1]) if not net and randf() < HELPER.chance else null
 
 
 func me() -> Player:
+	for p in players:
+		if p.local:
+			return p
 	return players[0]
 
 
+func humans() -> Array:
+	return players.filter(func(p): return not p.bot)
+
+
 func earned() -> int:
-	return coins + (Config.CLEAR_BONUS * (stage + 1) if status == "won" else 0)
+	return int(credits.get(me_id, 0)) + (Config.CLEAR_BONUS * (stage + 1) if status == "won" else 0)
 
 
-func _make_player(id: String, name: String, uniform: Color, weapon: String) -> Player:
+func _make_player(id: String, name: String, uniform: Color, weapon: String, slot := 0) -> Player:
 	var p := Player.new()
 	p.id = id
 	p.name = name
 	p.uniform = uniform
 	p.w = PW
 	p.h = PH
-	p.x = map.start.x - PW / 2
+	p.x = clampf(map.start.x - PW / 2 + (1 if slot % 2 else -1) * ceili(slot / 2.0) * 70, 0, map.width - PW)
 	p.y = minf(map.surface_below(p.x + PW / 2, map.start.y - 200), Config.AH) - PH
 	p.hp = Config.PLAYER.hp
 	p.max_hp = p.hp
@@ -302,7 +324,15 @@ func throw_grenade(p: Player) -> void:
 	if p.grenades <= 0 or p.g_cd > 0:
 		return
 	p.grenades -= 1
+	p.g_throws += 1
 	p.g_cd = Config.GRENADE.cooldown
+	spawn_grenade(p)
+	# خلصت الرمانات: يرجع لأقوى سلاح
+	if p.grenades <= 0 and p.weapon == "grenade":
+		p.weapon = best_gun()
+
+
+func spawn_grenade(p: Player) -> void:
 	var a := world_aim(p.face, aim_of(p))
 	var gr := Grenade.new()
 	gr.x = p.x + PW / 2 + p.face * 18
@@ -314,9 +344,6 @@ func throw_grenade(p: Player) -> void:
 	grenades.append(gr)
 	p.recoil = 1
 	sounds.append("throw")
-	# خلصت الرمانات: يرجع لأقوى سلاح
-	if p.grenades <= 0 and p.weapon == "grenade":
-		p.weapon = best_gun()
 
 
 func start_reload(p: Player) -> void:
@@ -367,6 +394,8 @@ func explode(gr: Grenade) -> void:
 	var top := map.surface_below(gr.x, gr.y - 20)
 	if top < Config.AH:
 		decals.append({x = gr.x, y = top + 3, r = 46.0, life = 8.0, burn = true})
+	if not authority:
+		return
 	for z in zs:
 		if z.dead > 0:
 			continue
@@ -614,7 +643,8 @@ func spawn_zombie() -> void:
 
 # وين يطلع الزومبي: جنب اللاعب (برّه الشاشة)، والطاير ينزل من السما
 func spawn_spot(z: Zombie) -> Dictionary:
-	var anchor := me()
+	var alive := players.filter(func(q): return q.hp > 0 and not q.chute)
+	var anchor: Player = alive[randi() % alive.size()] if alive.size() else players[0]
 	var ax := anchor.x + PW / 2
 	var face_of := func(x: float) -> int: return 1 if x < ax else -1
 	if z.kind == "flyer":
@@ -660,9 +690,10 @@ func hurt_player(p: Player, z: Zombie) -> void:
 		return
 	p.hp = maxf(0, p.hp - Config.ZOMBIES[z.kind].damage)
 	p.inv = 0.6
-	p.kb = z.face * 300
-	if p.on_ground:
-		p.vy = -300
+	if p.local or p.bot:
+		p.kb = z.face * 300
+		if p.on_ground:
+			p.vy = -300
 	if p.local:
 		sounds.append("hurt")
 	splash(p.x + PW / 2, p.y + 40, 7, [Color("#b71c1c"), Color("#7f1010")], z.face)
@@ -770,9 +801,14 @@ func kill_zombie(z: Zombie, owner: String, dir: float) -> void:
 	z.kb = dir * 120
 	killed += 1
 	var c: int = Config.ZOMBIES[z.kind].coins
+	credits[owner] = int(credits.get(owner, 0)) + c
+	kills.append([roundi(z.x + z.w / 2), roundi(z.y), c, owner])
 	if owner != "bot":
-		coins += c
-		pops.append({x = z.x + z.w / 2, y = z.y, text = "+%d" % c, life = 1.2, head = false})
+		pops.append({x = z.x + z.w / 2, y = z.y, text = "+%d" % c, life = 1.2, head = false, mine = owner == me_id})
+	death_fx(z, dir)
+
+
+func death_fx(z: Zombie, dir: float) -> void:
 	splash(z.x + z.w / 2, z.y + z.h * 0.35, 14, [Color("#7a1212"), Color("#4b1010"), Color("#5d6b2a")], dir, 4)
 	var dx := z.x + z.w / 2 + dir * 30
 	var top := map.surface_below(dx, z.y + z.h - 20)
@@ -790,14 +826,17 @@ func step(inp: Inp, dt: float) -> void:
 	for p in players:
 		if p.local:
 			update_local(p, inp, dt)
-		else:
+		elif p.bot:
 			bot_ai(p, dt)
+		else:
+			update_remote(p, dt)
 		p.fire_cd -= dt
 		p.g_cd -= dt
 		p.recoil = maxf(0, p.recoil - dt * 9)
 		p.flash -= dt
 		p.inv -= dt
-		if p.reload > 0:
+		var own := p.local or p.bot
+		if own and p.reload > 0:
 			p.reload -= dt
 			if p.reload <= 0 and p.weapon != "grenade":
 				p.reload = 0
@@ -805,11 +844,15 @@ func step(inp: Inp, dt: float) -> void:
 				if p.local:
 					sounds.append("reload")
 		if p.hp > 0 and p.firing and p.fire_cd <= 0 and status == "play" and p.weapon != "grenade" and p.reload <= 0:
-			if p.ammo[p.weapon] > 0:
+			if not own:
+				# لاعب ثاني يرمي: نرسم طلقته (والمضيف يحسب ضررها)
 				fire(p)
-				p.ammo[p.weapon] -= 1
-			if p.ammo[p.weapon] <= 0:
-				start_reload(p)
+			else:
+				if p.ammo[p.weapon] > 0:
+					fire(p)
+					p.ammo[p.weapon] -= 1
+				if p.ammo[p.weapon] <= 0:
+					start_reload(p)
 	players = players.filter(func(p): return not (p.bot and p.dead > 3))
 
 	# ── البوت المساعد: طيارة تنزله بنص المرحلة (مو بكل لعبة) ──
@@ -818,8 +861,8 @@ func step(inp: Inp, dt: float) -> void:
 		launch_helper()
 	update_plane(dt)
 
-	# ── ظهور الزومبي (يزيدون كل ما تتقدم بالمرحلة) ──
-	if status == "play":
+	# ── ظهور الزومبي (يزيدون كل ما تتقدم بالمرحلة، وأكثر إذا أكو لاعبين أكثر) ──
+	if authority and status == "play":
 		var st: Dictionary = Config.STAGES[stage]
 		var prog := float(spawned) / total
 		var living := 0
@@ -827,10 +870,11 @@ func step(inp: Inp, dt: float) -> void:
 			if z.dead == 0:
 				living += 1
 		spawn_cd -= dt
-		if spawned < total and spawn_cd <= 0 and living < st.max_alive + int(prog * 4):
+		var people := humans().size()
+		if spawned < total and spawn_cd <= 0 and living < st.max_alive + int(prog * 4) + (people - 1) * 3:
 			spawn_zombie()
 			spawned += 1
-			spawn_cd = randf_range(st.every[0], st.every[1]) * (1 - 0.35 * prog)
+			spawn_cd = randf_range(st.every[0], st.every[1]) * (1 - 0.35 * prog) / sqrt(people)
 
 	# ── الزومبي ──
 	for z in zs:
@@ -840,10 +884,19 @@ func step(inp: Inp, dt: float) -> void:
 		if z.dead > 0:
 			z.dead += dt
 			z.vx = z.kb
-			physics(z, dt)
+			if authority or z.net == null:
+				physics(z, dt)
 			continue
 		var ox := z.x
-		if z.kind == "flyer":
+		if not authority:
+			# الزومبي يتحرك حسب آخر سنابشوت (مع توقع بسيط حتى تكون الحركة ناعمة)
+			if z.net != null:
+				var ahead := minf(0.2, time - z.net.at)
+				var k := minf(1.0, dt * 10)
+				z.x += (z.net.x + z.net.vx * ahead - z.x) * k
+				z.y += (z.net.y + z.net.vy * ahead - z.y) * k
+				z.vx = z.net.vx
+		elif z.kind == "flyer":
 			flyer_ai(z, dt)
 		else:
 			zombie_ai(z, dt)
@@ -852,7 +905,7 @@ func step(inp: Inp, dt: float) -> void:
 			if z.y > Config.AH + 150:
 				z.dead = 5
 				killed += 1
-		if z.on_ground or z.kind == "flyer":
+		if z.on_ground or z.kind == "flyer" or not authority:
 			z.phase += absf(z.x - ox) * TAU / 120 + (dt * 9 if z.kind == "flyer" else 0.0)
 	zs = zs.filter(func(z): return z.dead < 1.6)
 
@@ -893,14 +946,16 @@ func step(inp: Inp, dt: float) -> void:
 		splash(hit.x + hit.w / 2 - dir * hit.w * 0.3, hy, 12 if head else 5, [Color("#7a1212"), Color("#5d6b2a"), Color("#ffd27a")], dir, 4.0 if head else 3.0)
 		if head:
 			sounds.append("headshot")
-			if b.owner == "me":
-				pops.append({x = hit.x + hit.w / 2, y = hit.y - 18, text = "هيدشوت!", life = 0.9, head = true})
+			if b.owner == me_id:
+				pops.append({x = hit.x + hit.w / 2, y = hit.y - 18, text = "هيدشوت!", life = 0.9, head = true, mine = true})
 		else:
 			sounds.append("hit")
-		hit.hp -= b.dmg * (Config.HEADSHOT if head else 1.0)
-		hit.kb = dir * (50.0 if hit.kind == "brute" else 140.0)
-		if hit.hp <= 0:
-			kill_zombie(hit, b.owner, dir)
+		# الضرر الحقيقي يحسبه المضيف بس
+		if authority:
+			hit.hp -= b.dmg * (Config.HEADSHOT if head else 1.0)
+			hit.kb = dir * (50.0 if hit.kind == "brute" else 140.0)
+			if hit.hp <= 0:
+				kill_zombie(hit, b.owner, dir)
 	bullets = bullets.filter(func(b): return b.life > 0 and b.x > -500 and b.x < map.width + 500 and b.y > -600 and b.y < Config.AH + 100)
 
 	update_grenades(dt)
@@ -934,11 +989,179 @@ func step(inp: Inp, dt: float) -> void:
 		d.life -= dt
 	decals = decals.filter(func(d): return d.life > 0)
 
-	# ── نهاية المرحلة ──
-	if status == "play":
+	# ── نهاية المرحلة (المضيف يقرر) ──
+	if authority and status == "play":
 		if killed >= total:
 			status = "won"
 			sounds.append("win")
-		elif me().hp <= 0:
+		elif humans().all(func(q): return q.hp <= 0):
 			status = "lost"
 			sounds.append("lose")
+
+
+# ════════ اللعب الجماعي: تحويل الحالة لرسايل صغيرة وبالعكس ════════
+const KINDS := ["walker", "tough", "brute", "flyer", "runner", "monster"]
+
+
+# لاعب ثاني: يتحرك بنعومة لآخر مكان وصل (مع توقع بسيط)
+func update_remote(p: Player, dt: float) -> void:
+	if p.hp <= 0:
+		p.dead += dt
+	if p.net == null:
+		return
+	var n: Dictionary = p.net
+	var ahead := minf(0.15, time - n.at)
+	var tx: float = n.x + n.vx * ahead
+	var ty: float = n.y + (0.0 if p.on_ground else n.vy * ahead)
+	var k := minf(1.0, dt * 14)
+	if absf(tx - p.x) > 250:
+		p.x = tx
+	else:
+		p.x += (tx - p.x) * k
+	p.y += (ty - p.y) * k
+	p.vx = n.vx
+	p.vy = n.vy
+	if p.on_ground:
+		p.phase += absf(p.vx) * dt * TAU / 150
+
+
+func add_player(who: Dictionary, weapon: String) -> Player:
+	for q in players:
+		if q.id == who.id:
+			return q
+	var p := _make_player(who.id, who.name, who.uniform, weapon, players.size())
+	players.append(p)
+	return p
+
+
+func remove_player(id: String) -> void:
+	players = players.filter(func(p): return p.local or p.bot or p.id != id)
+
+
+# حالة لاعبي (كل لاعب يرسل حالته)
+func player_msg() -> Dictionary:
+	var p := me()
+	return {id = p.id, x = roundi(p.x), y = roundi(p.y), vx = roundi(p.vx), vy = roundi(p.vy), f = p.face, g = p.on_ground,
+		w = p.weapon, fi = p.firing, gn = p.g_throws, a = snappedf(p.aim, 0.01), rl = snappedf(reload_progress(p), 0.05)}
+
+
+func apply_player_msg(m: Dictionary, who: Dictionary) -> void:
+	if m.get("id") == me_id:
+		return
+	var p := add_player(who, str(m.w))
+	p.name = who.name
+	p.uniform = who.uniform
+	if p.net == null:
+		p.x = m.x
+		p.y = m.y
+		p.g_seen = int(m.get("gn", 0))
+	p.net = {x = float(m.x), y = float(m.y), vx = float(m.vx), vy = float(m.vy), at = time}
+	p.face = int(m.f)
+	p.on_ground = bool(m.g)
+	p.weapon = str(m.w)
+	p.firing = bool(m.fi)
+	p.aim = float(m.get("a", 0.0 if p.face > 0 else PI))
+	# نخلي التعبئة تبين على اللاعب الثاني
+	var rl := float(m.get("rl", 0))
+	p.reload = (1 - rl) * Config.WEAPONS[p.weapon].reload if rl > 0 and p.weapon != "grenade" else 0.0
+	# رمى رمانات جديدة
+	var gn := int(m.get("gn", 0))
+	for i in mini(3, gn - p.g_seen):
+		spawn_grenade(p)
+	p.g_seen = maxi(p.g_seen, gn)
+
+
+# سنابشوت المضيف: الزومبي + صحة اللاعبين + الفلوس + القتلات الجديدة
+func snapshot() -> Dictionary:
+	var z := []
+	for q in zs:
+		var flags := (1 if q.atk_t > 0 else 0) | (2 if q.dead > 0 else 0) | (4 if q.hurt > 0 else 0) | (8 if q.on_ground else 0)
+		z.append_array([q.id, KINDS.find(q.kind), roundi(q.x), roundi(q.y), q.face, maxf(0, snappedf(q.hp, 0.1)), flags, q.max])
+	var hp := {}
+	for p in humans():
+		hp[p.id] = roundi(p.hp)
+	var ev := kills
+	kills = []
+	return {st = ["play", "won", "lost"].find(status), k = killed, n = spawned, z = z, hp = hp, c = credits.duplicate(), ev = ev}
+
+
+func apply_snapshot(s: Dictionary) -> void:
+	var seen := {}
+	var arr: Array = s.get("z", [])
+	var i := 0
+	while i + 7 < arr.size():
+		var id := int(arr[i])
+		var kind: String = KINDS[clampi(int(arr[i + 1]), 0, KINDS.size() - 1)]
+		var x := float(arr[i + 2])
+		var y := float(arr[i + 3])
+		var face := int(arr[i + 4])
+		var hp := float(arr[i + 5])
+		var flags := int(arr[i + 6])
+		var mx := float(arr[i + 7])
+		i += 8
+		seen[id] = true
+		var z: Zombie = null
+		for q in zs:
+			if q.id == id:
+				z = q
+				break
+		if z == null:
+			z = new_zombie(id, kind)
+			z.x = x
+			z.y = y
+			if kind == "monster":
+				sounds.append("roar")
+			zs.append(z)
+		z.max = mx if mx > 0 else z.max
+		var prev = z.net if z.net != null else {x = x, y = y}
+		z.net = {x = x, y = y, vx = (x - prev.x) * 8, vy = (y - prev.y) * 8 if kind == "flyer" else 0.0, at = time}
+		z.face = face
+		z.hp = hp
+		z.on_ground = (flags & 8) > 0
+		if flags & 1 and z.atk_t <= 0:
+			z.atk_t = 0.35
+		if flags & 4:
+			z.hurt = 0.09
+		if flags & 2 and z.dead == 0:
+			z.dead = 0.0001
+			z.vy = -260
+			z.net = null
+	# الزومبي اللي اختفى من السنابشوت
+	zs = zs.filter(func(q): return q.dead > 0 or seen.has(q.id))
+
+	killed = int(s.get("k", killed))
+	spawned = int(s.get("n", spawned))
+	credits = s.get("c", credits)
+	var hps: Dictionary = s.get("hp", {})
+	for p in players:
+		if not hps.has(p.id) or p.bot:
+			continue
+		var hp := float(hps[p.id])
+		if p.local and hp < p.hp:
+			# انضربت: نرجع لورا شوية
+			var near: Zombie = null
+			for q in zs:
+				if q.dead == 0 and (near == null or absf(q.x - p.x) < absf(near.x - p.x)):
+					near = q
+			p.kb = (-1.0 if near != null and near.x > p.x else 1.0) * 300
+			if p.on_ground:
+				p.vy = -300
+			p.inv = 0.6
+			sounds.append("hurt")
+			splash(p.x + PW / 2, p.y + 40, 7, [Color("#b71c1c"), Color("#7f1010")], 0)
+		elif not p.local and hp < p.hp:
+			p.inv = 0.6
+		p.hp = hp
+	for e in s.get("ev", []):
+		var owner := str(e[3])
+		if owner != "bot":
+			pops.append({x = float(e[0]), y = float(e[1]), text = "+%d" % int(e[2]), life = 1.2, head = false, mine = owner == me_id})
+		for q in zs:
+			if q.dead > 0 and absf(q.x + q.w / 2 - float(e[0])) < 30:
+				death_fx(q, -q.face)
+				break
+	var st: String = ["play", "won", "lost"][clampi(int(s.get("st", 0)), 0, 2)]
+	if st != status:
+		status = st
+		if st != "play":
+			sounds.append("win" if st == "won" else "lose")

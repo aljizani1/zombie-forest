@@ -85,7 +85,7 @@ func _draw() -> void:
 			var w := font.get_string_size(q.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
 			var x: float = q.x - (w + 22) / 2
 			_coin(Vector2(x + 9, q.y - 8), 9, a)
-			_text(q.text, Vector2(x + 22 + w / 2, q.y), 22, Color(1, 0.82, 0.25, a), Color(0, 0, 0, 0.75 * a))
+			_text(q.text, Vector2(x + 22 + w / 2, q.y), 22, Color(1, 0.82, 0.25, a) if q.get("mine", true) else Color(0.9, 0.9, 0.9, a), Color(0, 0, 0, 0.75 * a))
 
 
 func _text(s: String, pos: Vector2, size: int, col: Color, outline: Color) -> void:
@@ -170,12 +170,13 @@ func _draw_player(p: Game.Player, t: float) -> void:
 		g.glow(mp, 34, Color(1, 0.94, 0.7, 0.95), Color(1, 0.47, 0.08, 0), 16)
 		g.fill(PackedVector2Array([mp + Vector2(-d.y, d.x) * 5, mp + d * 26, mp - Vector2(-d.y, d.x) * 5, mp + d * 8]), Color(1, 0.98, 0.86, 0.95))
 
-	if p.bot:
+	# اسم اللاعبين الثانيين (والبوت) وصحتهم فوگ راسهم
+	if not p.local:
 		var top := p.y - 268 if p.chute else p.y - 22
 		g.end()
 		_text(p.name, Vector2(cx, top), 15, Color.WHITE, Color(0, 0, 0, 0.7))
 		if p.hp > 0:
-			_bar(cx, top + 6, 46, p.hp / p.max_hp, Color("#4fc3f7"))
+			_bar(cx, top + 6, 46, p.hp / p.max_hp, Color("#4fc3f7") if p.bot else Color("#7bd64a"))
 
 
 func _draw_zombie(z: Game.Zombie, t: float) -> void:

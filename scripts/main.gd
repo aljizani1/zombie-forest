@@ -1,6 +1,6 @@
 # ════════ الشاشة الرئيسية ════════
-# القائمة (اختيار المرحلة + المتجر)، اللعب، الكاميرا، الكيبورد والماوس، ونهاية المرحلة.
-# الحفظ: user://save.cfg (أعلى مرحلة مفتوحة، الفلوس، الأسلحة).
+# القائمة (اختيار المرحلة + المتجر)، LAN (سيرفرات + لوبي)، اللعب، الكاميرا، الكيبورد والماوس، ونهاية المرحلة.
+# الحفظ: user://save.cfg (أعلى مرحلة مفتوحة، الفلوس، الأسلحة، الاسم).
 extends Node2D
 
 const SAVE_PATH := "user://save.cfg"
@@ -24,6 +24,17 @@ var owned: Array = ["pistol"]
 var weapon := "pistol"
 var stage := 0
 
+var player_name := ""
+
+# LAN
+var supa: Supa
+var session: Session
+var _screen := "menu" # menu / lan / lobby / game
+var _send_st := 0.0
+var _send_snap := 0.0
+var _rooms_box: VBoxContainer
+var _lan_status: Label
+
 var _use_touch := false
 var _mouse_aim := false
 var _ended := false
@@ -33,6 +44,8 @@ func _ready() -> void:
 	# خط Cairo العربي داخل اللعبة (المتصفح ما يعطي خطوط الجهاز)، وهو الخط الافتراضي بالمشروع كله
 	font = load("res://fonts/cairo_bold.tres")
 	_load()
+	supa = Supa.new()
+	add_child(supa)
 
 	scenery = preload("res://scripts/scenery.gd").new()
 	add_child(scenery)
@@ -71,6 +84,9 @@ func _ready() -> void:
 		_shot = args[args.find("--shot") + 1] if args.size() > args.find("--shot") + 1 else "user://shot.png"
 		if args.has("--stage"):
 			stage = int(args[args.find("--stage") + 1])
+		if args.has("--lan-host") or args.has("--lan-join"):
+			_auto_lan(args.has("--lan-host"))
+			return
 		if args.has("--menu"):
 			await get_tree().create_timer(3.0).timeout
 			print("menu fps=", Engine.get_frames_per_second())
@@ -106,6 +122,7 @@ func _load() -> void:
 	coins = cf.get_value("save", "coins", 0)
 	owned = cf.get_value("save", "owned", ["pistol"])
 	weapon = cf.get_value("save", "weapon", "pistol")
+	player_name = cf.get_value("save", "name", "")
 	stage = mini(unlocked, Config.STAGES.size() - 1)
 
 
@@ -115,6 +132,7 @@ func _save() -> void:
 	cf.set_value("save", "coins", coins)
 	cf.set_value("save", "owned", owned)
 	cf.set_value("save", "weapon", weapon)
+	cf.set_value("save", "name", player_name)
 	cf.save(SAVE_PATH)
 
 
@@ -168,13 +186,18 @@ func _panel_box() -> VBoxContainer:
 	return box
 
 
-func _show_menu() -> void:
+func _stop_game() -> void:
 	game = null
 	actors.game = null
 	hud.game = null
 	hud.visible = false
 	touch.visible = false
 	_clear_ui()
+
+
+func _show_menu() -> void:
+	_screen = "menu"
+	_stop_game()
 	var box := _panel_box()
 	_label("زومبي الغابة", 64, box, Color("#ffd23f"))
 	_label("الفلوس: %d" % coins, 26, box, Color("#ffd23f"))
@@ -189,7 +212,14 @@ func _show_menu() -> void:
 	sl.custom_minimum_size = Vector2(200, 0)
 	var nxt := _button(">", func(): _pick_stage(1), row)
 	nxt.custom_minimum_size = Vector2(70, 64)
-	_button("ابدأ", _start, box, true)
+	var play_row := HBoxContainer.new()
+	play_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	play_row.add_theme_constant_override("separation", 12)
+	box.add_child(play_row)
+	_button("ابدأ", _start, play_row, true)
+	var lan := _button("LAN (نفس الواي فاي)", _show_lan, play_row)
+	lan.add_theme_stylebox_override("normal", _style(Color("#2f6fb3")))
+	lan.custom_minimum_size = Vector2(300, 64)
 
 	# المتجر
 	var shop := HBoxContainer.new()
@@ -227,11 +257,30 @@ func _shop(w: String) -> void:
 	_show_menu()
 
 
+func _style(col: Color) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = col
+	sb.set_corner_radius_all(14)
+	sb.border_color = Color(1, 1, 1, 0.8)
+	sb.set_border_width_all(3)
+	return sb
+
+
 func _start() -> void:
+	_begin(Game.new(world, stage, owned, weapon))
+
+
+func _begin(g: Game) -> void:
+	_screen = "game"
 	_clear_ui()
 	inp = Game.Inp.new()
 	touch.inp = inp
-	game = Game.new(world, stage, owned, weapon)
+	game = g
+	# زر الخروج (فوگ يسار تحت معلومات السلاح)
+	var quit := _button("خروج", _quit_game, ui)
+	quit.custom_minimum_size = Vector2(110, 44)
+	quit.add_theme_font_size_override("font_size", 20)
+	quit.position = Vector2(14, 112)
 	actors.game = game
 	hud.game = game
 	hud.visible = true
@@ -242,6 +291,14 @@ func _start() -> void:
 
 func _view_w() -> float:
 	return get_viewport().get_visible_rect().size.x
+
+
+func _quit_game() -> void:
+	if session != null:
+		_leave_session()
+		_show_lan()
+	else:
+		_show_menu()
 
 
 func _show_end() -> void:
@@ -256,6 +313,17 @@ func _show_end() -> void:
 	var box := _panel_box()
 	_label("فزت!" if won else "خسرت", 60, box, Color("#7bd64a") if won else Color("#e53935"))
 	_label("+%d فلوس" % earned, 30, box, Color("#ffd23f"))
+	if session != null:
+		# LAN: المضيف يقرر شنو بعدها
+		if session.is_host:
+			if won and stage < Config.STAGES.size() - 1:
+				_button("المرحلة الجاية", func(): session.start(stage + 1), box, true)
+			_button("إعادة", func(): session.start(stage), box, not won)
+			_button("اللوبي", func(): session.back_to_lobby(), box)
+		else:
+			_label("انتظار المضيف...", 26, box)
+			_button("طلوع", _quit_game, box)
+		return
 	if won and stage < Config.STAGES.size() - 1:
 		_button("المرحلة الجاية", func():
 			stage += 1
@@ -269,12 +337,18 @@ func _process(delta: float) -> void:
 	if game == null:
 		return
 	var dt := minf(delta, 1.0 / 30)
-	if _shot != "":
+	if _shot != "" and session != null:
+		inp.move = 0.4 if fmod(game.time, 4.0) < 2.0 else -0.4
+		inp.fire = true
+		inp.aim = 0.0 if inp.move > 0 else PI
+	elif _shot != "":
 		_auto_play(delta)
 	elif not _use_touch:
 		_keyboard()
 	game.step(inp, dt)
 	game.sounds.clear()
+	if session != null:
+		_net_tick(delta)
 	if game.status != "play" and game.end_t > 1.2 and not _ended:
 		_show_end()
 
@@ -315,6 +389,216 @@ func _unhandled_input(e: InputEvent) -> void:
 			KEY_R:
 				inp.reload = true
 			KEY_ESCAPE:
-				_show_menu()
+				_quit_game()
 			KEY_A, KEY_D, KEY_LEFT, KEY_RIGHT:
 				_mouse_aim = false
+
+
+# ════════ LAN ════════
+func _show_lan(msg := "") -> void:
+	_screen = "lan"
+	_stop_game()
+	var box := _panel_box()
+	_label("LAN - العب ويا اللي على نفس الواي فاي", 34, box, Color("#ffd23f"))
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 10)
+	box.add_child(row)
+	_label("اسمك:", 24, row)
+	var name_edit := LineEdit.new()
+	name_edit.text = player_name if player_name != "" else "لاعب %d" % (randi() % 900 + 100)
+	player_name = name_edit.text
+	name_edit.max_length = 16
+	name_edit.custom_minimum_size = Vector2(260, 52)
+	name_edit.add_theme_font_size_override("font_size", 24)
+	name_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_edit.text_changed.connect(func(t: String):
+		player_name = t.strip_edges() if t.strip_edges() != "" else "لاعب"
+		_save())
+	row.add_child(name_edit)
+	_lan_status = _label(msg, 22, box, Color("#ff8a80") if msg != "" else Color.WHITE)
+	var btns := HBoxContainer.new()
+	btns.alignment = BoxContainer.ALIGNMENT_CENTER
+	btns.add_theme_constant_override("separation", 12)
+	box.add_child(btns)
+	_button("إنشاء سيرفر", _create_room, btns, true)
+	_button("رجوع", _show_menu, btns)
+	_label("السيرفرات بشبكتك:", 24, box)
+	_rooms_box = VBoxContainer.new()
+	_rooms_box.add_theme_constant_override("separation", 8)
+	box.add_child(_rooms_box)
+	_label("...", 22, _rooms_box)
+	_refresh_rooms()
+
+
+# قائمة السيرفرات تتحدث كل 3 ثواني وانت بهاي الشاشة
+func _refresh_rooms() -> void:
+	while _screen == "lan":
+		var box := _rooms_box
+		var rows = await supa.call_fn("list_rooms", {p_lan = true})
+		if _screen != "lan" or box != _rooms_box or not is_instance_valid(box):
+			return
+		for c in box.get_children():
+			c.queue_free()
+		if not (rows is Array):
+			_label("ما گدرت أجيب السيرفرات، تأكد من النت", 22, box, Color("#ff8a80"))
+		elif rows.is_empty():
+			_label("ماكو سيرفرات بشبكتك هسه. سوّي واحد أو انتظر صاحبك يسوي", 22, box, Color(1, 1, 1, 0.7))
+		else:
+			for r in rows:
+				var info := "%s   (%d/%d)   %s" % [r.name, int(r.players), Session.MAX_PLAYERS, "يلعبون المرحلة %d" % (int(r.stage) + 1) if r.status == "playing" else "باللوبي"]
+				var b := _button(info, func(): _join_room(str(r.code)), box)
+				b.custom_minimum_size = Vector2(560, 56)
+				b.add_theme_font_size_override("font_size", 22)
+		await get_tree().create_timer(3.0).timeout
+
+
+func _new_session() -> Session:
+	var s := Session.new()
+	add_child(s)
+	return s
+
+
+func _create_room() -> void:
+	if session != null:
+		return
+	if is_instance_valid(_lan_status):
+		_lan_status.text = "دا أسوي السيرفر..."
+	var s := _new_session()
+	session = s
+	var err := await s.create(supa, player_name)
+	if err != "":
+		session = null
+		_show_lan(err)
+		return
+	_wire_session()
+	_show_lobby()
+
+
+func _join_room(code: String) -> void:
+	if session != null:
+		return
+	if is_instance_valid(_lan_status):
+		_lan_status.text = "دا أدخل..."
+	var s := _new_session()
+	session = s
+	var err := await s.join(supa, code, player_name)
+	if err != "":
+		session = null
+		_show_lan(err)
+		return
+	_wire_session()
+	if session.playing:
+		_start_net(session.stage)
+	else:
+		_show_lobby()
+
+
+func _wire_session() -> void:
+	var s := session
+	s.roster_changed.connect(func():
+		if _screen == "lobby":
+			_show_lobby())
+	s.started.connect(func(st: int): _start_net(st))
+	s.to_lobby.connect(func(_st: int): _show_lobby())
+	s.state_msg.connect(func(m: Dictionary):
+		if game != null and m.has("id"):
+			game.apply_player_msg(m, s.who(str(m.id))))
+	s.snap_msg.connect(func(snap: Dictionary):
+		if game != null and not s.is_host:
+			game.apply_snapshot(snap))
+	s.closed.connect(func(why: String):
+		session = null
+		_show_lan(why))
+
+
+func _leave_session() -> void:
+	if session != null:
+		session.leave()
+		session = null
+
+
+func _show_lobby() -> void:
+	if session == null:
+		return
+	_screen = "lobby"
+	_stop_game()
+	var box := _panel_box()
+	_label(session.room_name, 36, box, Color("#ffd23f"))
+	_label("اللاعبين (%d/%d):" % [session.members.size(), Session.MAX_PLAYERS], 24, box)
+	for m in session.members:
+		var tag := " (المضيف)" if m.host else ""
+		var me_tag := " - انت" if m.id == session.me.id else ""
+		_label(m.name + tag + me_tag, 26, box, session.uniform_of(m.id).lightened(0.35))
+	if session.is_host:
+		var row := HBoxContainer.new()
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		row.add_theme_constant_override("separation", 12)
+		box.add_child(row)
+		var prev := _button("<", func():
+			session.stage = clampi(session.stage - 1, 0, mini(unlocked, Config.STAGES.size() - 1))
+			_show_lobby(), row)
+		prev.custom_minimum_size = Vector2(70, 60)
+		var sl := _label("المرحلة %d" % (session.stage + 1), 30, row)
+		sl.custom_minimum_size = Vector2(190, 0)
+		var nxt := _button(">", func():
+			session.stage = clampi(session.stage + 1, 0, mini(unlocked, Config.STAGES.size() - 1))
+			_show_lobby(), row)
+		nxt.custom_minimum_size = Vector2(70, 60)
+		_button("ابدأ", func(): session.start(session.stage), box, true)
+	else:
+		_label("انتظار المضيف يبدي المرحلة...", 24, box, Color(1, 1, 1, 0.8))
+	_button("طلوع", func():
+		_leave_session()
+		_show_lan(), box)
+
+
+func _start_net(st: int) -> void:
+	if session == null:
+		return
+	stage = st
+	var who := session.who(session.me.id)
+	_begin(Game.new(world, st, owned, weapon, who, session.is_host, true, maxi(0, session.index_of(session.me.id))))
+
+
+# نرسل حالتنا (والمضيف يرسل السنابشوت) كم مرة بالثانية
+func _net_tick(delta: float) -> void:
+	var r := session.rates()
+	_send_st += delta
+	if _send_st >= 1.0 / r[0]:
+		_send_st = 0
+		session.send_state(game.player_msg())
+	if session.is_host:
+		_send_snap += delta
+		if _send_snap >= 1.0 / r[1]:
+			_send_snap = 0
+			session.send_snap(game.snapshot())
+	# اللي طلعوا من السيرفر
+	for p in game.players:
+		if not p.local and not p.bot and session.index_of(p.id) < 0:
+			game.remove_player(p.id)
+
+
+# ── للفحص: جهازين يلعبون LAN لوحدهم ويحفظون صورة ──
+func _auto_lan(host: bool) -> void:
+	player_name = "مضيف" if host else "ضيف"
+	if host:
+		await _create_room()
+		while session != null and session.members.size() < 2:
+			await get_tree().process_frame
+		await get_tree().create_timer(1.0).timeout
+		session.start(0)
+	else:
+		var rows = []
+		while not (rows is Array) or rows.is_empty():
+			rows = await supa.call_fn("list_rooms", {p_lan = true})
+			await get_tree().create_timer(1.0).timeout
+		await _join_room(str(rows[0].code))
+		while game == null:
+			await get_tree().process_frame
+	await get_tree().create_timer(10.0).timeout
+	print("lan ", "host" if host else "client", ": players=", game.players.size(), " zombies=", game.zs.size(), " killed=", game.killed, " direct=", session.direct(), " coins=", game.earned())
+	get_viewport().get_texture().get_image().save_png(_shot)
+	_leave_session()
+	await get_tree().create_timer(0.5).timeout
+	get_tree().quit()
