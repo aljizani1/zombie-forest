@@ -259,6 +259,7 @@ func _peer(id: String):
 	pc.ice_candidate_created.connect(func(media: String, index: int, cname: String):
 		_signal(id, "ice", {media = media, index = index, name = cname}))
 	pc.data_channel_received.connect(func(dc: WebRTCDataChannel): p.dc = dc)
+	p.logged = false
 	return p
 
 
@@ -334,6 +335,10 @@ func _process(dt: float) -> void:
 		if dc == null:
 			continue
 		dc.poll()
+		# نطبع بالـ console لمن الاتصال المباشر يشتغل (للفحص)
+		if not p.logged and dc.get_ready_state() == WebRTCDataChannel.STATE_OPEN:
+			p.logged = true
+			print("LAN: اتصال مباشر (WebRTC) ويا ", name_of(id))
 		while dc.get_available_packet_count() > 0:
 			var m = JSON.parse_string(dc.get_packet().get_string_from_utf8())
 			if not (m is Dictionary):
