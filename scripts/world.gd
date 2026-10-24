@@ -72,6 +72,7 @@ func _init(seed_value := 2026) -> void:
 		dx += r.randf_range(180, 420)
 
 	start = Vector2(sx, 620)
+	build_cells()
 
 
 func _on_ground(gx: float):
@@ -81,21 +82,106 @@ func _on_ground(gx: float):
 	return null
 
 
-# سطح الأرض عند نقطة x (null = حفرة)
-func ground_at(x: float):
-	var top = null
+# ════════ الأرض كمربعات (تنحفر وتنبني) ════════
+# الأرض مقسومة مربعات 20×20: فارغ، تراب (ينحفر بالكرك)، طابوق (اللاعب يبنيه والزومبي يكسرونه)، صخر (آخر صفّين، ما ينحفر).
+# المنصات الطايرة تبقى مثل ما هي (تنط عليها من تحت وما تنحفر).
+signal changed(col: int) # انحفر أو انبنى شي بهذا العمود
+
+const CELL := 20.0
+const EMPTY := 0
+const DIRT := 1
+const BRICK := 2
+const ROCK := 3
+const BRICK_HP := 40.0
+
+var cols := 0
+var rows := 0
+var cells := PackedByteArray()
+var _orig := PackedByteArray() # الأرض الأصلية (حتى نرجعها بكل جولة، ورسم الحفر)
+var brick_hp := {} # رقم المربع ← الصحة الباقية
+
+
+func build_cells() -> void:
+	cols = ceili(width / CELL)
+	rows = ceili(Config.AH / CELL)
+	cells.resize(cols * rows)
+	cells.fill(EMPTY)
 	for g in ground:
-		if x >= g.x0 and x <= g.x1 and (top == null or g.y < top):
-			top = g.y
-	return top
+		var c0 := int(ceil(g.x0 / CELL - 0.5))
+		var c1 := int(floor(g.x1 / CELL - 0.5))
+		var r0 := int(g.y / CELL)
+		for c in range(maxi(0, c0), mini(cols - 1, c1) + 1):
+			for r in range(r0, rows):
+				cells[r * cols + c] = ROCK if r >= rows - 2 else DIRT
+	_orig = cells.duplicate()
+
+
+# نرجّع الأرض مثل ما كانت (بداية كل جولة)
+func reset_cells() -> void:
+	if cells != _orig:
+		cells = _orig.duplicate()
+		brick_hp.clear()
+		for c in cols:
+			changed.emit(c)
+
+
+func cell(c: int, r: int) -> int:
+	if c < 0 or c >= cols or r < 0 or r >= rows:
+		return EMPTY
+	return cells[r * cols + c]
+
+
+func set_cell(c: int, r: int, v: int) -> void:
+	if c < 0 or c >= cols or r < 0 or r >= rows:
+		return
+	var i := r * cols + c
+	if cells[i] == v:
+		return
+	cells[i] = v
+	if v == BRICK:
+		brick_hp[i] = BRICK_HP
+	else:
+		brick_hp.erase(i)
+	changed.emit(c)
+
+
+func solid_at(x: float, y: float) -> bool:
+	return cell(int(floor(x / CELL)), int(floor(y / CELL))) != EMPTY
+
+
+# أي مربع صلب داخل المستطيل؟ يرجع رقم المربع (c, r) أو (-1, -1)
+func hit_box(x: float, y: float, w: float, h: float) -> Vector2i:
+	var c0 := int(floor(x / CELL))
+	var c1 := int(floor((x + w - 0.01) / CELL))
+	var r0 := maxi(0, int(floor(y / CELL)))
+	var r1 := mini(rows - 1, int(floor((y + h - 0.01) / CELL)))
+	for c in range(c0, c1 + 1):
+		for r in range(r0, r1 + 1):
+			if cell(c, r) != EMPTY:
+				return Vector2i(c, r)
+	return Vector2i(-1, -1)
+
+
+# سطح الأرض عند نقطة x (أعلى مربع صلب بالعمود، null = حفرة)
+func ground_at(x: float):
+	var c := int(floor(x / CELL))
+	if c < 0 or c >= cols:
+		return null
+	for r in rows:
+		if cells[r * cols + c] != EMPTY:
+			return r * CELL
+	return null
 
 
 # أول سطح (أرض أو منصة) تحت النقطة
 func surface_below(x: float, y: float) -> float:
 	var best := Config.AH + 400
-	for g in ground:
-		if x >= g.x0 and x <= g.x1 and g.y >= y - 4 and g.y < best:
-			best = g.y
+	var c := int(floor(x / CELL))
+	if c >= 0 and c < cols:
+		for r in range(maxi(0, int(ceil((y - 4) / CELL))), rows):
+			if cells[r * cols + c] != EMPTY:
+				best = r * CELL
+				break
 	for p in platforms:
 		if x >= p.x0 and x <= p.x1 and p.y >= y - 4 and p.y < best:
 			best = p.y

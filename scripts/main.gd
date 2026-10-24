@@ -5,6 +5,7 @@
 extends Node2D
 
 const SAVE_PATH := "user://save.cfg"
+const BRICK_PRICE := 40 # سعر 10 طابوقات
 
 # الإنجازات: المعرّف ← [الاسم، الوصف]
 const ACHIEVEMENTS := {
@@ -39,10 +40,12 @@ var ui: Control # الشاشات (قوائم، نهاية الجولة، زر ا
 var coins := 0
 var owned: Array = ["pistol"]
 var weapon := "pistol"
+var bricks := 10 # طابوق للبناء
 var level := 1.0 # صعوبتي
 var token := ""
 var player_name := ""
 var sound_on := true
+var coins_moved := false # فلوس الجهاز انتقلت للحساب
 
 # الحساب
 var online := false # داخل بحساب (لو لا = بدون نت)
@@ -78,6 +81,9 @@ func _ready() -> void:
 	scenery = preload("res://scripts/scenery.gd").new()
 	add_child(scenery)
 	scenery.setup(world)
+	var terrain: Node2D = preload("res://scripts/terrain_view.gd").new()
+	add_child(terrain)
+	terrain.setup(world)
 	actors = preload("res://scripts/actors.gd").new()
 	actors.font = font
 	add_child(actors)
@@ -140,10 +146,12 @@ func _load() -> void:
 	coins = cf.get_value("save", "coins", 0)
 	owned = cf.get_value("save", "owned", ["pistol"])
 	weapon = cf.get_value("save", "weapon", "pistol")
+	bricks = cf.get_value("save", "bricks", 10)
 	level = cf.get_value("save", "level", 1.0)
 	token = cf.get_value("save", "token", "")
 	player_name = cf.get_value("save", "name", "")
 	sound_on = cf.get_value("save", "sound", true)
+	coins_moved = cf.get_value("save", "coins_moved", false)
 
 
 func _save() -> void:
@@ -151,10 +159,12 @@ func _save() -> void:
 	cf.set_value("save", "coins", coins)
 	cf.set_value("save", "owned", owned)
 	cf.set_value("save", "weapon", weapon)
+	cf.set_value("save", "bricks", bricks)
 	cf.set_value("save", "level", level)
 	cf.set_value("save", "token", token)
 	cf.set_value("save", "name", player_name)
 	cf.set_value("save", "sound", sound_on)
+	cf.set_value("save", "coins_moved", coins_moved)
 	cf.save(SAVE_PATH)
 
 
@@ -358,6 +368,12 @@ func _signed_in(r: Dictionary) -> void:
 	has_pin = bool(r.get("has_pin", false))
 	is_admin = bool(r.get("admin", false))
 	level = maxf(1.0, float(r.get("level", level)))
+	var server := int(r.get("coins", 0))
+	if coins > 0 and not coins_moved:
+		var m = await supa.call_fn("player_add_coins", {p_token = token, p_amount = coins, p_from_device = true})
+		server = int(m.coins) if m is Dictionary and m.get("ok", false) else server
+	coins_moved = true
+	coins = server
 	_save()
 	_show_menu()
 	_refresh_stats()
@@ -386,6 +402,8 @@ func _show_menu() -> void:
 	_button("المتصدرين", _show_leaderboard, r2, false, Color("#7a5a1e"))
 	if online:
 		_button("ملفي", func(): _show_profile(player_name), r2, false, Color("#3d6b35"))
+	if online:
+		_button("تبرع لصديق", _show_gift, r2, false, Color("#1f7a5c"))
 	_button("الإعدادات", _show_settings, r2)
 	if is_admin:
 		_button("لوحة الأدمن", _show_admin, r2, false, Color("#5b2a86"))
@@ -404,18 +422,38 @@ func _show_menu() -> void:
 		var b := _button(text, func(): _shop(w), shop, weapon == w)
 		b.custom_minimum_size = Vector2(200, 56)
 		b.disabled = not owned.has(w) and coins < cfg.price
+	var bb := _button("طابوق +10 (%d)   عندك %d" % [BRICK_PRICE, bricks], func():
+		if await _spend(BRICK_PRICE):
+			bricks += 10
+			_save()
+			_show_menu(), shop, false, Color("#8a4a24"))
+	bb.custom_minimum_size = Vector2(280, 56)
+	bb.disabled = coins < BRICK_PRICE
 
 
 func _shop(w: String) -> void:
 	if not owned.has(w):
 		var price: int = Config.WEAPONS[w].price
-		if coins < price:
+		if not await _spend(price):
 			return
-		coins -= price
 		owned.append(w)
 	weapon = w
 	_save()
 	_show_menu()
+
+
+# نصرف من الفلوس (بالحساب إذا داخل، لو لا من الجهاز)
+func _spend(amount: int) -> bool:
+	if coins < amount:
+		return false
+	if not online:
+		coins -= amount
+		return true
+	var r = await supa.call_fn("player_spend", {p_token = token, p_amount = amount})
+	if r is Dictionary and r.get("ok", false):
+		coins = int(r.coins)
+		return true
+	return false
 
 
 # ════════ الإعدادات (الرمز، الصوت، الخروج) ════════
@@ -551,10 +589,14 @@ func _show_admin() -> void:
 		int(d.players_total), int(d.online_now), int(d.active_today), int(d.rounds_today), int(d.online_rounds_today), int(d.rooms_now)]
 	for room in d.get("rooms", []):
 		_label("سيرفر: %s (%d لاعبين) %s %s" % [room.name, int(room.players), "LAN" if room.lan else "أونلاين", "يلعبون" if room.status == "playing" else "باللوبي"], 20, list, Color("#4fc3f7"))
+	if not d.get("gifts", []).is_empty():
+		_label("آخر التبرعات:", 22, list, Color("#7bd64a"))
+		for g in d.get("gifts", []):
+			_label("%s ← %s : %d فلوس (%s)" % [g.to_name, g.from_name, int(g.amount), ago(str(g.at))], 20, list)
 	_label("آخر اللاعبين:", 22, list, Color("#ffd23f"))
 	for p in d.get("players", []):
-		var t := "%s   |   %d زومبي   |   %d جولة   |   صعوبة %.1f   |   لعب %s   |   %s   |   آخر ظهور %s" % [
-			p.name, int(p.kills), int(p.rounds), float(p.level), duration(int(p.play_seconds)), "برمز" if p.has_pin else "بدون رمز", ago(str(p.last_seen))]
+		var t := "%s   |   %d زومبي   |   %d فلوس   |   %d جولة   |   صعوبة %.1f   |   لعب %s   |   %s   |   آخر ظهور %s" % [
+			p.name, int(p.kills), int(p.get("coins", 0)), int(p.rounds), float(p.level), duration(int(p.play_seconds)), "برمز" if p.has_pin else "بدون رمز", ago(str(p.last_seen))]
 		var b := _button(t, func(): _show_profile(str(p.name)), list)
 		b.custom_minimum_size = Vector2(880, 46)
 		b.add_theme_font_size_override("font_size", 18)
@@ -571,6 +613,7 @@ func _begin(g: Game) -> void:
 	inp = Game.Inp.new()
 	touch.inp = inp
 	game = g
+	game.me().bricks = bricks
 	# زر الخروج (فوگ يسار تحت معلومات السلاح)
 	var quit := _button("خروج", _quit_game, ui)
 	quit.custom_minimum_size = Vector2(110, 44)
@@ -589,6 +632,9 @@ func _view_w() -> float:
 
 
 func _quit_game() -> void:
+	if game != null:
+		bricks = game.me().bricks
+		_save()
 	if session != null:
 		_leave_session()
 		_show_lan()
@@ -602,6 +648,7 @@ func _show_end() -> void:
 	var won := game.status == "won"
 	var earned := game.earned()
 	coins += earned
+	bricks = game.me().bricks
 	var net := session != null
 	var nxt := game.next_level()
 	var new_ach := _achievements(won)
@@ -610,6 +657,7 @@ func _show_end() -> void:
 		level = nxt
 	_save()
 	if online:
+		_add_coins(earned)
 		supa.call_fn("player_report", {p_token = token, p_kills = game.my_kills, p_headshots = game.my_headshots, p_seconds = int(game.time),
 			p_level = game.level, p_next_level = level, p_won = won, p_online = net, p_achievements = new_ach})
 		stats.kills = int(stats.get("kills", 0)) + game.my_kills
@@ -893,6 +941,29 @@ func _net_tick(delta: float) -> void:
 # ════════ للفحص ════════
 func _auto_play(delta: float) -> void:
 	_shot_t += delta
+	# فحص الحفر: يحفر لتحت ويمين، وبعدين يبني طابوق يسار
+	if OS.get_cmdline_user_args().has("--dig"):
+		var me := game.me()
+		inp.move = 0
+		inp.fire = true
+		if _shot_t < 0.2:
+			me.weapon = "shovel"
+			if _shot_t < delta * 1.5:
+				me.x += 520
+				me.y = 620 - Game.PH
+		if _shot_t < 2.5:
+			inp.aim = PI / 2 if _shot_t < 1.2 else 0.3
+		elif _shot_t < 4.0:
+			me.weapon = "brick"
+			inp.aim = PI if fmod(_shot_t, 0.5) < 0.25 else PI * 0.85
+		else:
+			me.weapon = "pistol"
+			inp.aim = PI
+		if _shot_t > 6.0:
+			print("dig test: bricks left=", me.bricks, " y=", me.y)
+			get_viewport().get_texture().get_image().save_png(_shot)
+			get_tree().quit()
+		return
 	inp.move = 0.4 if fmod(_shot_t, 4.0) < 2.0 else -0.4
 	inp.fire = true
 	inp.aim = 0.0 if inp.move > 0 else PI
@@ -927,3 +998,86 @@ func _auto_lan(host: bool) -> void:
 	_leave_session()
 	await get_tree().create_timer(0.5).timeout
 	get_tree().quit()
+
+
+func _add_coins(amount: int) -> void:
+	var r = await supa.call_fn("player_add_coins", {p_token = token, p_amount = amount})
+	if r is Dictionary and r.get("ok", false):
+		coins = int(r.coins)
+		_save()
+
+
+# ════════ التبرع ════════
+# قائمة اللاعبين المسجلين، تختار واحد، وتختار كم تنطيه
+func _show_gift(msg := "", query := "") -> void:
+	_screen = "gift"
+	_stop_game()
+	var box := _panel_box()
+	_label("تبرع لصديق", 40, box, Color("#7bd64a"))
+	_label("فلوسك: %d   -   اختار اللاعب اللي تريد تنطيه" % coins, 22, box, Color("#ffd23f"))
+	if msg != "":
+		_label(msg, 22, box, Color("#7bd64a") if msg.begins_with("وصلت") else Color("#ff8a80"), 800)
+	var r := _row(box)
+	var search := _edit(query, r, 300)
+	search.placeholder_text = "دوّر على اسم"
+	_button("دوّر", func(): _show_gift("", search.text.strip_edges()), r)
+	search.text_submitted.connect(func(t: String): _show_gift("", t.strip_edges()))
+	var list := _scroll(box, 300, 760)
+	_label("...", 22, list)
+	_button("رجوع", _show_menu, box)
+	var rows = await supa.call_fn("list_players", {p_query = query})
+	if _screen != "gift" or not is_instance_valid(list):
+		return
+	for c in list.get_children():
+		c.queue_free()
+	if not (rows is Array):
+		_label("ما گدرت أجيب الأسماء، تأكد من النت", 22, list, Color("#ff8a80"))
+		return
+	var shown := 0
+	for p in rows:
+		if str(p.name).to_lower() == player_name.to_lower():
+			continue
+		shown += 1
+		var b := _button("%s     (%d زومبي، آخر ظهور %s)" % [p.name, int(p.kills), ago(str(p.last_seen))], func(): _show_gift_amount(str(p.name)), list)
+		b.custom_minimum_size = Vector2(740, 50)
+		b.add_theme_font_size_override("font_size", 21)
+	if shown == 0:
+		_label("ماكو لاعبين بهذا الاسم", 22, list)
+
+
+func _show_gift_amount(to: String, msg := "") -> void:
+	_screen = "gift_amount"
+	_stop_game()
+	var box := _panel_box()
+	_label("تبرع لـ " + to, 40, box, Color("#7bd64a"))
+	_label("فلوسك: %d" % coins, 24, box, Color("#ffd23f"))
+	var status := _label(msg, 22, box, Color("#ff8a80"), 700)
+	var r := _row(box)
+	for amount in [50, 100, 500, 1000]:
+		var b := _button(str(amount), func(): _gift(to, amount), r, false, Color("#1f7a5c"))
+		b.custom_minimum_size = Vector2(130, 56)
+		b.disabled = coins < amount
+	var r2 := _row(box)
+	_label("أو اكتب المبلغ:", 22, r2)
+	var amt := _edit("", r2, 160)
+	amt.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+	_button("أرسل", func():
+		if not amt.text.is_valid_int() or int(amt.text) <= 0:
+			status.text = "اكتب رقم صحيح"
+			return
+		_gift(to, int(amt.text)), r2, true)
+	_button("رجوع", func(): _show_gift(), box)
+
+
+func _gift(to: String, amount: int) -> void:
+	if amount > coins:
+		_show_gift_amount(to, "ما عندك هلكد فلوس")
+		return
+	var r = await supa.call_fn("player_gift", {p_token = token, p_to = to, p_amount = amount})
+	if r is Dictionary and r.get("ok", false):
+		coins = int(r.coins)
+		_save()
+		_show_gift("وصلت %d فلوس لـ %s" % [amount, to])
+	else:
+		var err := str(r.get("error", "")) if r is Dictionary else ""
+		_show_gift_amount(to, {"coins": "ما عندك هلكد فلوس", "no_player": "اللاعب مو موجود", "self": "ما تكدر تتبرع لنفسك"}.get(err, "ما وصلت، تأكد من النت"))

@@ -17,6 +17,7 @@ const SOUNDS := {
 	"hit": [3, -10.0, 0.03], "headshot": [2, -6.0, 0.05], "die": [4, -7.0, 0.08],
 	"hurt": [3, -5.0, 0.15], "jump": [2, -14.0, 0.1], "throw": [2, -10.0, 0.1],
 	"boom": [2, -2.0, 0.08], "reload": [2, -9.0, 0.2], "roar": [2, -3.0, 0.5],
+	"dig": [3, -8.0, 0.12], "build": [2, -8.0, 0.12], "break": [2, -5.0, 0.1],
 	"plane": [1, -10.0, 1.0], "win": [1, -6.0, 1.0], "lose": [1, -6.0, 1.0],
 }
 
@@ -96,6 +97,16 @@ func _make(name: String, variant: int) -> AudioStreamWAV:
 			_mix(s, _tone(j.call(900, 1200), 0.03, 80, 0.3), int(RATE * 0.36))
 		"roar":
 			s = _groan(r, j.call(1.0, 1.3), j.call(95, 110), j.call(45, 55), 0.5)
+		"dig":
+			s = _noise(r, 0.16, j.call(0.18, 0.3), 22)
+			_mix(s, _noise(r, 0.02, 0.9, 150), 0)
+		"build":
+			s = _tone(j.call(160, 200), 0.12, 30, 0.8)
+			_mix(s, _noise(r, 0.05, 0.4, 60), 0)
+		"break":
+			s = _noise(r, 0.35, j.call(0.25, 0.4), 10)
+			_mix(s, _noise(r, 0.05, 0.8, 70), int(RATE * 0.04))
+			_mix(s, _tone(j.call(110, 140), 0.2, 15, 0.6), 0)
 		"plane":
 			s = _tone(70, 2.5, 0.6, 0.5)
 			_mix(s, _noise(r, 2.5, 0.05, 0.6), 0)

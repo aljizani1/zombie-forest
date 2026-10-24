@@ -22,6 +22,7 @@ class Body:
 	var on_ground := true
 	var drop := 0.0
 	var wall := 0 # صدم بحايط (1 يمين، -1 يسار)
+	var wall_cell := Vector2i(-1, -1) # المربع اللي صدمه
 
 
 class Player extends Body:
@@ -47,6 +48,8 @@ class Player extends Body:
 	var reload := 0.0
 	var grenades := 0
 	var g_cd := 0.0
+	var bricks := 0 # كم طابوقة عنده (كل وحدة = مربع 40×40)
+	var tool_cd := 0.0 # الانتظار بين ضربة كرك/بناء والثانية
 	var g_throws := 0 # عداد الرمانات (حتى الباقين يعرفون إنك رميت)
 	var g_seen := 0
 	var dead := 0.0
@@ -145,6 +148,8 @@ var authority := true # المضيف (أو لعب لوحدك)
 var networked := false
 var me_id := "me"
 var kills: Array = [] # قتلات جديدة لازم تنرسل بالسنابشوت الجاي
+var edits: Array = [] # تغييرات الأرض الأخيرة [عمود، صف، قيمة، وقت] (تنرسل كم مرة حتى ما تضيع)
+const TOOLS := ["shovel", "brick"]
 var status := "play" # play / won / lost
 var end_t := 0.0
 var owned: Array = ["pistol"]
@@ -157,6 +162,7 @@ var plane = null # {x, y, dir, drop_x, dropped}
 # who = {id, name, uniform} للاعب المحلي، net = لعب جماعي، slot = ترتيبه (حتى ما يطلعون فوگ بعض)
 func _init(m: World, level_v: float, owned_list: Array, weapon: String, who := {}, is_authority := true, net := false, slot := 0) -> void:
 	map = m
+	map.reset_cells()
 	level = maxf(1.0, level_v)
 	cfg = Config.level_cfg(level)
 	owned = owned_list
@@ -205,6 +211,10 @@ func _make_player(id: String, name: String, uniform: Color, weapon: String, slot
 	return p
 
 
+static func is_gun(w: String) -> bool:
+	return Config.WEAPONS.has(w)
+
+
 static func local_aim(face: int, aim: float) -> float:
 	var a := aim if face > 0 else PI - aim
 	a = atan2(sin(a), cos(a))
@@ -220,32 +230,42 @@ static func aim_of(p: Player) -> float:
 
 
 func reload_progress(p: Player) -> float:
-	if p.reload > 0 and p.weapon != "grenade":
+	if p.reload > 0 and is_gun(p.weapon):
 		return 1 - p.reload / Config.WEAPONS[p.weapon].reload
 	return 0.0
 
 
-# الحركة + التصادم مع الأرض (حيطان وسطوح) والمنصات
+# الحركة + التصادم ويا مربعات الأرض (تراب، طابوق، صخر) والمنصات
+const STEP_UP := 22.0 # الدرجة الصغيرة (مربع واحد) يصعدها بدون قفز
+
+
 func physics(o: Body, dt: float) -> bool:
 	var was_air := not o.on_ground
+	var C := World.CELL
 	o.vy = minf(o.vy + Config.GRAVITY * dt, MAX_FALL)
 	o.wall = 0
+	o.wall_cell = Vector2i(-1, -1)
 
-	# أفقي: الأرض الأعلى منك تصير حايط (إلا إذا صغيرة، تصعدها)
-	o.x += o.vx * dt
-	for b in map.ground:
-		var bottom := o.y + o.h
-		if bottom <= b.y + 1 or o.x + o.w <= b.x0 or o.x >= b.x1:
-			continue
-		if bottom - b.y <= 14 and o.vy >= 0:
-			o.y = b.y - o.h
-			continue
-		if o.x + o.w / 2 < (b.x0 + b.x1) / 2:
-			o.x = b.x0 - o.w
+	# أفقي: المربع اللي قدّامك يصير حايط (إلا إذا درجة صغيرة، تصعدها)
+	var mx := o.vx * dt
+	o.x = clampf(o.x + mx, 0, map.width - o.w)
+	var hb := map.hit_box(o.x, o.y, o.w, o.h)
+	if hb.x >= 0:
+		var feet := o.y + o.h
+		var up_y := floorf((feet - 0.01) / C) * C - o.h
+		if not was_air and o.y - up_y <= STEP_UP and map.hit_box(o.x, up_y, o.w, o.h).x < 0:
+			o.y = up_y
+		elif mx > 0:
+			o.x = floorf((o.x + o.w - 0.01) / C) * C - o.w - 0.01
 			o.wall = 1
-		else:
-			o.x = b.x1
+			o.wall_cell = hb
+		elif mx < 0:
+			o.x = (floorf(o.x / C) + 1) * C + 0.01
 			o.wall = -1
+			o.wall_cell = hb
+		else:
+			# طلع بنص مربع (مثلاً انبنى شي): نطلّعه لفوگ
+			o.y = floorf(o.y / C) * C - 0.01
 	o.x = clampf(o.x, 0, map.width - o.w)
 
 	# عمودي
@@ -253,13 +273,27 @@ func physics(o: Body, dt: float) -> bool:
 	o.y += o.vy * dt
 	o.on_ground = false
 	o.drop = maxf(0, o.drop - dt)
+	var c0 := int(floor((o.x + 2) / C))
+	var c1 := int(floor((o.x + o.w - 2) / C))
 	if o.vy < 0:
+		# راسه ضرب بالسقف (بالكهوف)
+		var r := int(floor(o.y / C))
+		for c in range(c0, c1 + 1):
+			if map.cell(c, r) != World.EMPTY:
+				o.y = (r + 1) * C
+				o.vy = 0
+				break
 		return false
 	var bottom := o.y + o.h
 	var land := INF
-	for b in map.ground:
-		if prev <= b.y + 0.5 and bottom >= b.y and o.x + o.w > b.x0 + 2 and o.x < b.x1 - 2:
-			land = minf(land, b.y)
+	var r0 := int(floor((prev - 0.5) / C))
+	var r1 := int(floor(bottom / C))
+	for c in range(c0, c1 + 1):
+		for r in range(maxi(0, r0), mini(map.rows - 1, r1) + 1):
+			var top := r * C
+			if map.cell(c, r) != World.EMPTY and top >= prev - 0.5:
+				land = minf(land, top)
+				break
 	if o.drop <= 0:
 		for p in map.platforms:
 			if prev <= p.y + 0.5 and bottom >= p.y and o.x + o.w > p.x0 + 8 and o.x < p.x1 - 8:
@@ -270,6 +304,11 @@ func physics(o: Body, dt: float) -> bool:
 		o.on_ground = true
 		return was_air
 	return false
+
+
+# واقف على أرض (مربعات) مو منصة؟
+func on_cells(o: Body) -> bool:
+	return map.solid_at(o.x + o.w / 2, o.y + o.h + 1)
 
 
 func splash(x: float, y: float, n: int, colors: Array, dir := 0.0, size := 3.0) -> void:
@@ -294,7 +333,7 @@ func muzzle_point(p: Player, w: String) -> Dictionary:
 
 
 func fire(p: Player) -> void:
-	if p.weapon == "grenade":
+	if not is_gun(p.weapon):
 		return
 	var w: Dictionary = Config.WEAPONS[p.weapon]
 	var m := muzzle_point(p, p.weapon)
@@ -353,7 +392,7 @@ func spawn_grenade(p: Player) -> void:
 
 
 func start_reload(p: Player) -> void:
-	if p.weapon == "grenade" or p.reload > 0 or p.ammo[p.weapon] >= Config.WEAPONS[p.weapon].mag:
+	if not is_gun(p.weapon) or p.reload > 0 or p.ammo[p.weapon] >= Config.WEAPONS[p.weapon].mag:
 		return
 	p.reload = Config.WEAPONS[p.weapon].reload
 	p.firing = false
@@ -402,6 +441,13 @@ func explode(gr: Grenade) -> void:
 		decals.append({x = gr.x, y = top + 3, r = 46.0, life = 8.0, burn = true})
 	if not authority:
 		return
+	# الانفجار يحفر حفرة بالتراب والطابوق
+	var C := World.CELL
+	for c in range(int((gr.x - 55) / C), int((gr.x + 55) / C) + 1):
+		for r in range(int((gr.y - 45) / C), int((gr.y + 55) / C) + 1):
+			var v := map.cell(c, r)
+			if (v == World.DIRT or v == World.BRICK) and Vector2((c + 0.5) * C - gr.x, (r + 0.5) * C - gr.y).length() < 52:
+				edit_cell(c, r, World.EMPTY)
 	for z in zs:
 		if z.dead > 0:
 			continue
@@ -429,9 +475,7 @@ func update_grenades(dt: float) -> void:
 		gr.y += gr.vy * dt
 		gr.rot += gr.vx * dt * 0.03
 		# حايط
-		var wall = map.ground_at(gr.x)
-		var prev_top = map.ground_at(px)
-		if wall != null and gr.y > wall + 6 and (prev_top == null or prev_top > py):
+		if map.solid_at(gr.x, gr.y - 4) and not map.solid_at(px, gr.y - 4):
 			gr.x = px
 			gr.vx *= -0.45
 		# ارتداد على الأرض أو المنصة
@@ -460,6 +504,9 @@ func slots(p: Player) -> Array:
 			list.append(w)
 	if p.grenades > 0:
 		list.append("grenade")
+	list.append("shovel")
+	if p.bricks > 0:
+		list.append("brick")
 	return list
 
 
@@ -490,7 +537,7 @@ func update_local(p: Player, inp: Inp, dt: float) -> void:
 			p.vy = -Config.PLAYER.jump
 			inp.jump = 0
 			sounds.append("jump")
-		if inp.down and p.on_ground and map.ground_at(p.x + PW / 2) != p.y + PH:
+		if inp.down and p.on_ground and not on_cells(p):
 			p.drop = 0.25
 		if inp.swap:
 			inp.swap = false
@@ -515,7 +562,7 @@ func update_local(p: Player, inp: Inp, dt: float) -> void:
 	p.kb *= pow(0.002, dt)
 	if physics(p, dt):
 		splash(p.x + PW / 2, p.y + PH - 2, 5, [Color("#a58a66"), Color("#c9b28c")], 0, 2.5)
-	if p.on_ground and map.ground_at(p.x + PW / 2) == p.y + PH:
+	if p.on_ground and on_cells(p):
 		p.safe = Vector2(p.x, p.y)
 	fell_in_pit(p)
 	if p.on_ground:
@@ -610,7 +657,7 @@ func bot_ai(p: Player, dt: float) -> void:
 	if target != null and target.y + target.h < p.y + PH - 80 and p.on_ground and absf(target.x - p.x) < 200 and randf() < dt * 2:
 		p.vy = -Config.PLAYER.jump
 	physics(p, dt)
-	if p.on_ground and map.ground_at(p.x + PW / 2) == p.y + PH:
+	if p.on_ground and on_cells(p):
 		p.safe = Vector2(p.x, p.y)
 	fell_in_pit(p)
 	if p.on_ground:
@@ -784,6 +831,22 @@ func zombie_ai(z: Zombie, dt: float) -> void:
 		z.atk = 0.9
 		z.atk_t = 0.35
 		hurt_player(target, z)
+	# طابوق بطريقه (أو تحت رجليه واللاعب جوّه): يوگف ويضربه لحد ما ينكسر
+	var brick := Vector2i(-1, -1)
+	if z.wall != 0 and map.cell(z.wall_cell.x, z.wall_cell.y) == World.BRICK:
+		brick = z.wall_cell
+	elif below and z.on_ground and absf(pcx - zcx) < 80:
+		var under := Vector2i(int(floor(zcx / World.CELL)), int(floor((zb + 1) / World.CELL)))
+		if map.cell(under.x, under.y) == World.BRICK:
+			brick = under
+	if brick.x >= 0 and not touching:
+		z.air = 0
+		z.vx = z.kb
+		if z.atk <= 0:
+			z.atk = 0.9
+			z.atk_t = 0.35
+			hit_brick(brick.x, brick.y, Config.ZOMBIES[z.kind].damage * 2)
+		return
 
 	# القفز للمنصات
 	z.jump_cd -= dt
@@ -792,7 +855,7 @@ func zombie_ai(z: Zombie, dt: float) -> void:
 		z.air = signf(dx) * maxf(z.speed, 260) * minf(1.0, absf(dx) / 80 + 0.3)
 		z.jump_cd = randf_range(1.2, 3) / cfg.jumpy
 	# النزول من المنصة إذا اللاعب جوّه
-	if below and z.on_ground and map.ground_at(zcx) != zb and absf(pcx - zcx) < 110:
+	if below and z.on_ground and not on_cells(z) and absf(pcx - zcx) < 110:
 		z.drop = 0.3
 	# صدم حايط (أرض أعلى منه): ينط
 	if z.wall != 0 and z.on_ground and z.jump_cd < 1:
@@ -844,14 +907,22 @@ func step(inp: Inp, dt: float) -> void:
 		p.flash -= dt
 		p.inv -= dt
 		var own := p.local or p.bot
+		p.tool_cd -= dt
+		if TOOLS.has(p.weapon):
+			if p.hp > 0 and p.firing and p.tool_cd <= 0 and status == "play":
+				if own:
+					use_tool(p)
+				else:
+					p.tool_cd = 0.22
+					p.recoil = 1
 		if own and p.reload > 0:
 			p.reload -= dt
-			if p.reload <= 0 and p.weapon != "grenade":
+			if p.reload <= 0 and is_gun(p.weapon):
 				p.reload = 0
 				p.ammo[p.weapon] = Config.WEAPONS[p.weapon].mag
 				if p.local:
 					sounds.append("reload")
-		if p.hp > 0 and p.firing and p.fire_cd <= 0 and status == "play" and p.weapon != "grenade" and p.reload <= 0:
+		if p.hp > 0 and p.firing and p.fire_cd <= 0 and status == "play" and is_gun(p.weapon) and p.reload <= 0:
 			if not own:
 				# لاعب ثاني يرمي: نرسم طلقته (والمضيف يحسب ضررها)
 				fire(p)
@@ -947,10 +1018,9 @@ func step(inp: Inp, dt: float) -> void:
 			if hit != null:
 				break
 			# الطلقة ضربت الأرض
-			var top = map.ground_at(px)
-			if top != null and py > top + 2:
+			if map.solid_at(px, py):
 				b.life = 0
-				splash(px, top, 3, [Color("#8a6a4a"), Color("#c9b28c")], 0, 2)
+				splash(px, py, 3, [Color("#8a6a4a"), Color("#c9b28c")], 0, 2)
 				break
 		if hit == null:
 			continue
@@ -1059,7 +1129,7 @@ func remove_player(id: String) -> void:
 func player_msg() -> Dictionary:
 	var p := me()
 	return {id = p.id, x = roundi(p.x), y = roundi(p.y), vx = roundi(p.vx), vy = roundi(p.vy), f = p.face, g = p.on_ground,
-		w = p.weapon, fi = p.firing, gn = p.g_throws, a = snappedf(p.aim, 0.01), rl = snappedf(reload_progress(p), 0.05)}
+		w = p.weapon, fi = p.firing, gn = p.g_throws, a = snappedf(p.aim, 0.01), rl = snappedf(reload_progress(p), 0.05), te = recent_edits()}
 
 
 func apply_player_msg(m: Dictionary, who: Dictionary) -> void:
@@ -1080,12 +1150,13 @@ func apply_player_msg(m: Dictionary, who: Dictionary) -> void:
 	p.aim = float(m.get("a", 0.0 if p.face > 0 else PI))
 	# نخلي التعبئة تبين على اللاعب الثاني
 	var rl := float(m.get("rl", 0))
-	p.reload = (1 - rl) * Config.WEAPONS[p.weapon].reload if rl > 0 and p.weapon != "grenade" else 0.0
+	p.reload = (1 - rl) * Config.WEAPONS[p.weapon].reload if rl > 0 and is_gun(p.weapon) else 0.0
 	# رمى رمانات جديدة
 	var gn := int(m.get("gn", 0))
 	for i in mini(3, gn - p.g_seen):
 		spawn_grenade(p)
 	p.g_seen = maxi(p.g_seen, gn)
+	apply_edits(m.get("te"))
 
 
 # سنابشوت المضيف: الزومبي + صحة اللاعبين + الفلوس + القتلات الجديدة
@@ -1099,7 +1170,7 @@ func snapshot() -> Dictionary:
 		hp[p.id] = roundi(p.hp)
 	var ev := kills
 	kills = []
-	return {st = ["play", "won", "lost"].find(status), k = killed, n = spawned, z = z, hp = hp, c = credits.duplicate(), ev = ev}
+	return {st = ["play", "won", "lost"].find(status), k = killed, n = spawned, z = z, hp = hp, c = credits.duplicate(), ev = ev, te = recent_edits()}
 
 
 func apply_snapshot(s: Dictionary) -> void:
@@ -1146,6 +1217,7 @@ func apply_snapshot(s: Dictionary) -> void:
 	# الزومبي اللي اختفى من السنابشوت
 	zs = zs.filter(func(q): return q.dead > 0 or seen.has(q.id))
 
+	apply_edits(s.get("te"))
 	killed = int(s.get("k", killed))
 	spawned = int(s.get("n", spawned))
 	credits = s.get("c", credits)
@@ -1199,3 +1271,95 @@ func min_hp_avg() -> float:
 # الصعوبة الجاية بعد ما تخلص الجولة
 func next_level() -> float:
 	return Config.next_level(level, status == "won", min_hp_avg(), time)
+
+
+# ════════ الحفر والبناء ════════
+# الأداة تشتغل على مربع 40×40 قدّام اللاعب (حسب اتجاه التصويب)
+func tool_target(p: Player) -> Vector2i:
+	var center := Vector2(p.x + PW / 2, p.y + 64)
+	var t := center + Vector2(cos(p.aim), sin(p.aim)) * 70
+	return Vector2i(int(floor(t.x / World.CELL - 0.5)), int(floor(t.y / World.CELL - 0.5)))
+
+
+func use_tool(p: Player) -> void:
+	var t := tool_target(p)
+	var C := World.CELL
+	if p.weapon == "shovel":
+		# الكرك يحفر 60×60 (أعرض من اللاعب حتى يكدر ينزل بالحفرة أو يمشي بالنفق)
+		var dug := 0
+		for dc in range(-1, 2):
+			for dr in range(-1, 2):
+				var v := map.cell(t.x + 1 + dc, t.y + 1 + dr)
+				if v == World.DIRT or v == World.BRICK:
+					edit_cell(t.x + 1 + dc, t.y + 1 + dr, World.EMPTY)
+					dug += 1
+		p.tool_cd = 0.22
+		p.recoil = 1
+		if dug > 0:
+			splash((t.x + 1) * C, (t.y + 1) * C, 8, [Color("#6b4a2b"), Color("#8a6a4a"), Color("#4a3220")], 0, 3)
+			sounds.append("dig")
+	elif p.weapon == "brick" and p.bricks > 0:
+		# لازم المكان فارغ وما بيه أحد
+		var r := Rect2(t.x * C, t.y * C, C * 2, C * 2)
+		for dc in 2:
+			for dr in 2:
+				if map.cell(t.x + dc, t.y + dr) != World.EMPTY:
+					return
+		for q in players:
+			if q.hp > 0 and r.intersects(Rect2(q.x, q.y, q.w, q.h)):
+				return
+		for z in zs:
+			if z.dead == 0 and r.intersects(Rect2(z.x, z.y, z.w, z.h)):
+				return
+		for dc in 2:
+			for dr in 2:
+				edit_cell(t.x + dc, t.y + dr, World.BRICK)
+		p.bricks -= 1
+		p.tool_cd = 0.25
+		p.recoil = 1
+		sounds.append("build")
+		if p.bricks <= 0:
+			p.weapon = best_gun()
+
+
+# نغيّر مربع ونسجله حتى ينرسل للباقين
+func edit_cell(c: int, r: int, v: int) -> void:
+	if map.cell(c, r) == World.ROCK:
+		return
+	map.set_cell(c, r, v)
+	edits.append([c, r, v, time])
+
+
+# الزومبي يضرب طابوقة
+func hit_brick(c: int, r: int, dmg: float) -> void:
+	var i := r * map.cols + c
+	var hp: float = map.brick_hp.get(i, World.BRICK_HP) - dmg
+	if hp <= 0:
+		edit_cell(c, r, World.EMPTY)
+		splash((c + 0.5) * World.CELL, (r + 0.5) * World.CELL, 10, [Color("#a0522d"), Color("#6e3b1f"), Color("#c9b28c")], 0, 3)
+		sounds.append("break")
+	else:
+		map.brick_hp[i] = hp
+		map.changed.emit(c)
+		sounds.append("hit")
+
+
+# التغييرات الأخيرة (آخر ثانية ونص) حتى تنرسل كم مرة وما تضيع
+func recent_edits() -> Array:
+	edits = edits.filter(func(e): return time - e[3] < 1.5)
+	return edits.map(func(e): return [e[0], e[1], e[2]])
+
+
+func apply_edits(list) -> void:
+	if not (list is Array):
+		return
+	for e in list:
+		if e is Array and e.size() >= 3:
+			var c := int(e[0])
+			var r := int(e[1])
+			var v := int(e[2])
+			if map.cell(c, r) != v and map.cell(c, r) != World.ROCK:
+				map.set_cell(c, r, v)
+				# المضيف يوصّل تغييرات اللاعبين للكل
+				if authority:
+					edits.append([c, r, v, time])

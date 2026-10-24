@@ -67,10 +67,12 @@ func _draw() -> void:
 
 	# السلاح والطلقات والرمانات
 	_panel(Rect2(14, 64, 250, 40))
-	var wname: String = "رمانة" if p.weapon == "grenade" else Config.WEAPONS[p.weapon].name
+	var wname: String = {"grenade": "رمانة", "shovel": "كرك", "brick": "طابوق"}.get(p.weapon, Config.WEAPONS.get(p.weapon, {}).get("name", ""))
 	var ammo := ""
-	if p.weapon != "grenade":
+	if Game.is_gun(p.weapon):
 		ammo = "تعبئة..." if p.reload > 0 else "%d / %d" % [p.ammo[p.weapon], Config.WEAPONS[p.weapon].mag]
+	elif p.weapon == "brick" or p.weapon == "shovel":
+		ammo = "طابوق %d" % p.bricks
 	_text(wname, Vector2(26, 92), 19)
 	_text(ammo, Vector2(110, 92), 19, Color("#ffd23f") if p.reload > 0 else Color.WHITE)
 	_text("رمانة %d" % p.grenades, Vector2(186, 92), 19)

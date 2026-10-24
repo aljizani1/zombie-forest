@@ -184,7 +184,7 @@ func _draw_player(p: Game.Player, t: float) -> void:
 		g.polyline(ring, Color("#ffd23f"), 4)
 
 	# وميض الطلقة
-	if p.flash > 0 and p.hp > 0 and p.weapon != "grenade":
+	if p.flash > 0 and p.hp > 0 and Game.is_gun(p.weapon):
 		var m := Rig.muzzle_of(p.weapon, p.recoil, pose, aim)
 		var mp := Vector2(cx + p.face * m.x, feet + m.y)
 		var d := Vector2(p.face * cos(aim), sin(aim))

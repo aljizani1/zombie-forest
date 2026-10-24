@@ -122,6 +122,7 @@ const GUN := {
 	"pistol": {grip = Vector2(24, 5), front = Vector2(3, 3), muzzle = Vector2(21, -8.5)},
 	"akm": {grip = Vector2(10, 15), front = Vector2(33, -4), muzzle = Vector2(65, -6.5)},
 	"pkm": {grip = Vector2(8, 16), front = Vector2(36, -3), muzzle = Vector2(86, -7)},
+	"shovel": {grip = Vector2(6, 16), front = Vector2(30, -2), muzzle = Vector2(70, 0)},
 }
 
 
@@ -147,9 +148,30 @@ static func _poly(pts: Array) -> PackedVector2Array:
 	return out
 
 
+# طابوقة صغيرة (بالإيد وللأيقونة)
+static func draw_brick(g: Painter, x: float, y: float, s := 1.0) -> void:
+	g.save()
+	g.translate(x, y)
+	g.scale(s, s)
+	g.shade(Painter.rect_pts(-9, -7, 18, 14, 2), Color("#b5562a"))
+	g.line(V(-9, 0), V(9, 0), Color("#e8d8c0", 0.7), 1.2)
+	g.line(V(0, -7), V(0, 0), Color("#e8d8c0", 0.7), 1.2)
+	g.line(V(-4, 0), V(-4, 7), Color("#e8d8c0", 0.7), 1.2)
+	g.line(V(5, 0), V(5, 7), Color("#e8d8c0", 0.7), 1.2)
+	g.restore()
+
+
 static func draw_gun(g: Painter, id: String) -> void:
 	var metal := Color("#3a3d44")
 	var wood := Color("#8a4f22")
+	if id == "shovel":
+		# كرك: يد خشب طويلة + راس حديد
+		g.limb(V(-22, 0), V(48, 0), 6, 5, Color("#9a6a3a"))
+		g.shade(Painter.rect_pts(-26, -4, 8, 8, 2), Color("#3b2a1c"))
+		var head := PackedVector2Array([V(44, -4), V(52, -12), V(70, -8), V(74, 0), V(70, 8), V(52, 12), V(44, 4)])
+		g.shade(head, Color("#8e979e"), true, 0.4)
+		g.line(V(56, -8), V(70, -3), Color(1, 1, 1, 0.35), 1.5)
+		return
 	if id == "pkm":
 		# رشاش PKC: أخمص هيكلي، صندوق طلق، سبطانة طويلة، مقبض حمل
 		var st := _poly([V(-36, -5), V(-4, -10), V(-2, -1), V(-30, 8)])
@@ -209,7 +231,7 @@ static func draw_gun(g: Painter, id: String) -> void:
 # ── الجندي ──
 # look = {uniform, flash, recoil, aim (0 = قدّام), reload (تقدّم تبديل المخزن 0..1)}
 static func draw_soldier(g: Painter, pose: Dictionary, slot, look: Dictionary) -> void:
-	var weapon = slot if slot != null and slot != "grenade" else null
+	var weapon = slot if slot != null and GUN.has(slot) else null
 	g.flash = look.flash
 	g.flash_to = Color("#ff3030")
 	var U: Color = look.uniform
@@ -229,7 +251,7 @@ static func draw_soldier(g: Painter, pose: Dictionary, slot, look: Dictionary) -
 	# وقت تبديل المخزن: السلاح ينزل شوية لتحت، والإيد الثانية تسحب المخزن وترجعه
 	var rl: float = look.reload
 	var aim: float = 0.55 if rl > 0 else look.aim
-	var gun_ang := aim - rec * 0.08
+	var gun_ang := aim - rec * 0.08 if weapon != "shovel" else aim + rec * 0.8 # الكرك ينزل لتحت وقت الحفر
 	var gp := Vector2.ZERO
 	if gi != null:
 		gp = sh + Vector2(gi.grip.x - rec * 6, gi.grip.y - rec * 1.5).rotated(aim)
@@ -237,7 +259,7 @@ static func draw_soldier(g: Painter, pose: Dictionary, slot, look: Dictionary) -
 
 	var back_sh := sh + V(-3, 3)
 	var front_sh := sh + V(2, 4)
-	var grenade: bool = slot == "grenade"
+	var grenade: bool = slot == "grenade" or slot == "brick"
 	var pull := sin(rl * PI) if rl > 0 else 0.0
 	var back_hand: Vector2
 	var mag_at := Vector2.ZERO
@@ -342,7 +364,10 @@ static func draw_soldier(g: Painter, pose: Dictionary, slot, look: Dictionary) -
 	g.limb(front_sh, fe, 13, 11.5, U)
 	g.limb(fe, front_hand, 11.5, 9.5, U)
 	if grenade and rec <= 0.25:
-		draw_grenade(g, front_hand.x + 2, front_hand.y - 5)
+		if slot == "brick":
+			draw_brick(g, front_hand.x + 2, front_hand.y - 6)
+		else:
+			draw_grenade(g, front_hand.x + 2, front_hand.y - 5)
 	g.blob(front_hand, 5.5, glove)
 	g.flash = 0.0
 
