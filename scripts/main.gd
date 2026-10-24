@@ -26,14 +26,12 @@ const ACHIEVEMENTS := {
 	"r50": ["مدمن", "تلعب 50 جولة"],
 }
 
-var world := World.new()
-var game: Game
-var inp := Game.Inp.new()
+var park: Park # الحديقة الثلاثية الأبعاد (تنبني مرة وحدة)
+var game: Game3D
+var inp := Game3D.Inp.new()
 var font: Font
 
-var scenery: Node2D
-var actors: Node2D
-var cam: Camera2D
+var _orbit := 0.0 # دوران الكاميرا ورا القوائم
 var hud: Control
 var touch: Control
 var ui: Control # الشاشات (قوائم، نهاية الجولة، زر الخروج)
@@ -80,24 +78,8 @@ func _ready() -> void:
 	supa = Supa.new()
 	add_child(supa)
 
-	scenery = preload("res://scripts/scenery.gd").new()
-	add_child(scenery)
-	scenery.setup(world)
-	var terrain: Node2D = preload("res://scripts/terrain_view.gd").new()
-	add_child(terrain)
-	terrain.setup(world)
-	actors = preload("res://scripts/actors.gd").new()
-	actors.font = font
-	add_child(actors)
-
-	cam = Camera2D.new()
-	cam.limit_left = 0
-	cam.limit_right = int(world.width)
-	cam.limit_top = 0
-	cam.limit_bottom = int(world.height)
-	cam.anchor_mode = Camera2D.ANCHOR_MODE_FIXED_TOP_LEFT
-	add_child(cam)
-	cam.position = Vector2(world.start.x - 640, 0)
+	park = Park.new()
+	add_child(park)
 
 	var layer := CanvasLayer.new()
 	layer.layer = 5
@@ -269,7 +251,8 @@ func _scroll(parent: Control, height := 330.0, width := 760.0) -> VBoxContainer:
 
 func _stop_game() -> void:
 	game = null
-	actors.game = null
+	if game != null:
+		game.queue_free()
 	hud.game = null
 	hud.visible = false
 	touch.visible = false
@@ -399,7 +382,7 @@ func _show_menu() -> void:
 
 	var r1 := _row(box)
 	_button("ابدأ", _start, r1, true)
-	_button("LAN (نفس الواي فاي)", _show_lan, r1, false, Color("#2f6fb3"))
+	_button("LAN (نفس الواي فاي)", func(): _show_notice("الـ LAN راح يرجع بالتحديث الجاي للنسخة الثلاثية الأبعاد"), r1, false, Color("#2f6fb3"))
 	_button("المتجر", _show_shop, r1, false, Color("#b8860b"))
 	var r2 := _row(box)
 	_button("المتصدرين", _show_leaderboard, r2, false, Color("#7a5a1e"))
@@ -433,14 +416,6 @@ func _show_shop() -> void:
 		var b := _button(text, func(): _shop(w), guns, weapon == w)
 		b.custom_minimum_size = Vector2(210, 56)
 		b.disabled = not owned.has(w) and coins < cfg.price
-	_label("للبناء:", 24, box)
-	var bb := _button("طابوق +10 (%d فلوس)   -   عندك %d" % [BRICK_PRICE, bricks], func():
-		if await _spend(BRICK_PRICE):
-			bricks += 10
-			_save()
-			_show_shop(), box, false, Color("#8a4a24"))
-	bb.custom_minimum_size = Vector2(420, 56)
-	bb.disabled = coins < BRICK_PRICE
 	if online:
 		var g := _button("تبرع لصديق", _show_gift, box, false, Color("#1f7a5c"))
 		g.custom_minimum_size = Vector2(420, 56)
@@ -620,28 +595,26 @@ func _show_admin() -> void:
 
 # ════════ اللعب ════════
 func _start() -> void:
-	_begin(Game.new(world, level, owned, weapon, {id = "me", name = player_name if player_name != "" else "أنا", uniform = Session.UNIFORMS[0]}))
+	_begin(Game3D.new(park, level, owned, weapon, {id = "me", name = player_name if player_name != "" else "أنا"}))
 
 
-func _begin(g: Game) -> void:
+func _begin(g: Game3D) -> void:
 	_screen = "game"
 	_clear_ui()
-	inp = Game.Inp.new()
+	inp = Game3D.Inp.new()
 	touch.inp = inp
 	game = g
-	game.me().bricks = bricks
+	park.add_child(game)
 	# زر الخروج (فوگ يسار تحت معلومات السلاح)
 	var quit := _button("خروج", _quit_game, ui)
 	quit.custom_minimum_size = Vector2(110, 44)
 	quit.add_theme_font_size_override("font_size", 20)
 	quit.position = Vector2(14, 112)
-	actors.game = game
 	hud.game = game
 	hud.visible = true
 	touch.visible = _use_touch
 	_ended = false
-	cam.position.x = clampf(game.me().x + Game.PW / 2 - _view_w() / 2, 0, world.width - _view_w())
-	cam.position.y = 0
+	touch.hide_ids = ["jump", "shovel", "brick"]
 
 
 func _view_w() -> float:
@@ -650,7 +623,6 @@ func _view_w() -> float:
 
 func _quit_game() -> void:
 	if game != null:
-		bricks = game.me().bricks
 		_save()
 	if session != null:
 		_leave_session()
@@ -665,7 +637,6 @@ func _show_end() -> void:
 	var won := game.status == "won"
 	var earned := game.earned()
 	coins += earned
-	bricks = game.me().bricks
 	var net := session != null
 	var nxt := game.next_level()
 	var new_ach := _achievements(won)
@@ -734,6 +705,10 @@ func _process(delta: float) -> void:
 			_touch_t = 0
 			supa.call_fn("player_touch", {p_token = token})
 	if game == null:
+		_orbit += delta * 0.06
+		var c := Vector3(cos(_orbit) * 24, 19, sin(_orbit) * 24)
+		park.cam.position = c
+		park.cam.look_at(Vector3.ZERO)
 		return
 	var dt := minf(delta, 1.0 / 30)
 	if _shot != "" and session != null:
@@ -757,29 +732,17 @@ func _process(delta: float) -> void:
 	if game.status != "play" and game.end_t > 1.2 and not _ended:
 		_show_end()
 
-	# الكاميرا تلحق اللاعب
-	var vw := _view_w()
-	var target := clampf(game.me().x + Game.PW / 2 - vw / 2, 0, maxf(0, world.width - vw))
-	cam.position.x += (target - cam.position.x) * minf(1.0, dt * 7)
-	# تحت الأرض: الكاميرا تنزل وياك (فوگ الأرض تبقى على السما)، وكل ما تنزل أكثر تخلّيك بنص الشاشة
-	var vh := get_viewport().get_visible_rect().size.y
-	var feet := game.me().y + Game.PH
-	var down := maxf(0.0, feet - 620)
-	var ty := clampf(down + clampf(down * 0.8, 0, 260), 0, world.height - vh)
-	cam.position.y += (ty - cam.position.y) * minf(1.0, dt * 8)
-	cam.offset = Vector2(randf_range(-0.5, 0.5), randf_range(-0.25, 0.25)) * game.shake * 30 if game.shake > 0 else Vector2.ZERO
 
 
 func _keyboard() -> void:
 	var k := func(a: Key, b := KEY_NONE) -> bool: return Input.is_physical_key_pressed(a) or (b != KEY_NONE and Input.is_physical_key_pressed(b))
 	inp.move = (1.0 if k.call(KEY_D, KEY_RIGHT) else 0.0) - (1.0 if k.call(KEY_A, KEY_LEFT) else 0.0)
+	inp.move_v = Vector2(inp.move, (1.0 if k.call(KEY_S, KEY_DOWN) else 0.0) - (1.0 if k.call(KEY_W, KEY_UP) else 0.0)).normalized()
 	inp.down = k.call(KEY_S, KEY_DOWN)
 	var mouse_fire := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	inp.fire = mouse_fire or k.call(KEY_J)
 	if _mouse_aim:
-		var p := game.me()
-		var chest := Vector2(p.x + Game.PW / 2, p.y + 40)
-		inp.aim = (get_global_mouse_position() - chest).angle()
+		inp.aim = game.aim_at_screen(get_viewport().get_mouse_position())
 	else:
 		inp.aim = null
 
@@ -791,24 +754,17 @@ func _unhandled_input(e: InputEvent) -> void:
 		_mouse_aim = true
 	if e is InputEventKey and e.pressed and not e.echo:
 		match e.physical_keycode:
-			KEY_W, KEY_UP, KEY_SPACE:
-				inp.jump = 0.15
 			KEY_Q:
 				inp.swap = true
 			KEY_G:
 				inp.throw = true
 			KEY_R:
 				inp.reload = true
-			KEY_1:
-				inp.select = game.best_gun()
-			KEY_2:
-				inp.select = "shovel"
-			KEY_3:
-				inp.select = "brick"
+
 			KEY_ESCAPE:
 				_quit_game()
-			KEY_A, KEY_D, KEY_LEFT, KEY_RIGHT:
-				_mouse_aim = false
+			KEY_SPACE:
+				inp.throw = true
 
 
 # ════════ LAN ════════
@@ -946,7 +902,7 @@ func _start_net(lv: float) -> void:
 	if session == null:
 		return
 	var who := session.who(session.me.id)
-	_begin(Game.new(world, lv, owned, weapon, who, session.is_host, true, maxi(0, session.index_of(session.me.id))))
+	_show_notice("الـ LAN راح يرجع بالتحديث الجاي")
 
 
 # نرسل حالتنا (والمضيف يرسل السنابشوت) كم مرة بالثانية
@@ -970,43 +926,16 @@ func _net_tick(delta: float) -> void:
 # ════════ للفحص ════════
 func _auto_play(delta: float) -> void:
 	_shot_t += delta
-	# فحص الحفر: يحفر لتحت ويمين، وبعدين يبني طابوق يسار
-	if OS.get_cmdline_user_args().has("--dig"):
-		var me := game.me()
-		inp.move = 0
-		inp.fire = true
-		if _shot_t < 0.2:
-			me.weapon = "shovel"
-			if _shot_t < delta * 1.5:
-				me.x += 520
-				me.y = 620 - Game.PH
-		if OS.get_cmdline_user_args().has("--deep"):
-			inp.aim = PI / 2
-			if _shot_t > 9.0:
-				print("deep test: depth=", int((me.y + Game.PH - 620) / World.CELL), " cam_y=", cam.position.y)
-				get_viewport().get_texture().get_image().save_png(_shot)
-				get_tree().quit()
-			return
-		if _shot_t < 2.5:
-			inp.aim = PI / 2 if _shot_t < 1.2 else 0.3
-		elif _shot_t < 4.0:
-			me.weapon = "brick"
-			inp.aim = PI if fmod(_shot_t, 0.5) < 0.25 else PI * 0.85
-		else:
-			me.weapon = "pistol"
-			inp.aim = PI
-		if _shot_t > 6.0:
-			print("dig test: bricks left=", me.bricks, " y=", me.y)
-			get_viewport().get_texture().get_image().save_png(_shot)
-			get_tree().quit()
-		return
-	inp.move = 0.4 if fmod(_shot_t, 4.0) < 2.0 else -0.4
-	inp.fire = true
-	inp.aim = 0.0 if inp.move > 0 else PI
-	if fmod(_shot_t, 1.5) < delta:
-		inp.jump = 0.15
-	if _shot_t > 8.0:
-		print("fps=", Engine.get_frames_per_second(), " zombies=", game.zs.size(), " level=", game.level, " kills=", game.my_kills)
+	# يدور ويرمي على أقرب زومبي
+	inp.move_v = Vector2.from_angle(_shot_t * 0.8) * 0.8
+	var near = null
+	for z in game.zs:
+		if z.dead == 0 and (near == null or z.pos.distance_to(game.me().pos) < near.pos.distance_to(game.me().pos)):
+			near = z
+	inp.fire = near != null
+	inp.aim = (near.pos - game.me().pos).angle() if near != null else null
+	if _shot_t > 10.0:
+		print("fps=", Engine.get_frames_per_second(), " zombies=", game.zs.size(), " kills=", game.my_kills, " hp=", game.me().hp)
 		get_viewport().get_texture().get_image().save_png(_shot)
 		get_tree().quit()
 
@@ -1117,3 +1046,11 @@ func _gift(to: String, amount: int) -> void:
 	else:
 		var err := str(r.get("error", "")) if r is Dictionary else ""
 		_show_gift_amount(to, {"coins": "ما عندك هلكد فلوس", "no_player": "اللاعب مو موجود", "self": "ما تكدر تتبرع لنفسك"}.get(err, "ما وصلت، تأكد من النت"))
+
+
+func _show_notice(text: String) -> void:
+	_screen = "notice"
+	_stop_game()
+	var box := _panel_box()
+	_label(text, 30, box, Color("#ffd23f"), 800)
+	_button("رجوع", _show_menu, box)

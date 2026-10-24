@@ -16,7 +16,8 @@ const LAYOUT := {
 	"brick": {x = 0.66, y = 0.4, size = 60.0},
 }
 
-var inp: Game.Inp
+var inp # مدخلات اللعبة
+var hide_ids: Array = ["jump", "shovel", "brick"] # أزرار مو مستعملة بالنسخة الثلاثية الأبعاد
 var opacity := 0.85
 var _fingers := {} # رقم الإصبع ← الزر
 var _knob := {"stick": Vector2.ZERO, "fire": Vector2.ZERO}
@@ -43,6 +44,8 @@ func _hit(pos: Vector2) -> String:
 	var best := ""
 	var best_d := INF
 	for id in LAYOUT:
+		if hide_ids.has(id):
+			continue
 		var d := pos.distance_to(_center(id))
 		var r := _radius(id) * (1.6 if id == "stick" or id == "fire" else 1.3)
 		if d < r and d < best_d:
@@ -95,6 +98,7 @@ func _release(id: String) -> void:
 		_knob.stick = Vector2.ZERO
 		_jumped = false
 		inp.move = 0
+		inp.move_v = Vector2.ZERO
 		inp.down = false
 	elif id == "fire":
 		_knob.fire = Vector2.ZERO
@@ -117,6 +121,8 @@ func _move_stick(id: String, pos: Vector2) -> void:
 		_jumped = up
 		inp.move = signf(n.x) * mag
 		inp.down = n.y > 0.7
+		# حركة بكل الاتجاهات (نتجاهل الهزّة الصغيرة بالنص)
+		inp.move_v = n if n.length() > 0.15 else Vector2.ZERO
 	else:
 		# التصويب: الاتجاه = وين تأشّر، ويرمي إذا سحبت شوية
 		if n.length() > 0.3:
@@ -130,6 +136,8 @@ func _move_stick(id: String, pos: Vector2) -> void:
 func _draw() -> void:
 	var a := opacity
 	for id in LAYOUT:
+		if hide_ids.has(id):
+			continue
 		var c := _center(id)
 		var r := _radius(id)
 		if id == "stick" or id == "fire":
