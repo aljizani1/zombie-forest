@@ -30,11 +30,12 @@ var _ended := false
 
 
 func _ready() -> void:
-	# خط عربي من خطوط الجهاز (أندرويد فيه Noto Sans Arabic، والويندوز Tahoma/Arial)
-	var sf := SystemFont.new()
-	sf.font_names = PackedStringArray(["Noto Sans Arabic", "Noto Naskh Arabic", "Tahoma", "Arial", "Roboto", "sans-serif"])
-	font = sf
-	ThemeDB.fallback_font = sf
+	# خط Cairo العربي داخل اللعبة (المتصفح ما يعطي خطوط الجهاز)، بوزن عريض
+	var fv := FontVariation.new()
+	fv.base_font = load("res://fonts/Cairo.ttf")
+	fv.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("weight"): 700}
+	font = fv
+	ThemeDB.fallback_font = fv
 	ThemeDB.fallback_font_size = 22
 	_load()
 
