@@ -93,9 +93,12 @@ const DIRT := 1
 const BRICK := 2
 const ROCK := 3
 const BRICK_HP := 40.0
+const DEPTH := 150 # كم مربع تحت آخر الشاشة (تحفر لحد هنا، وبعدها صخر)
 
 var cols := 0
 var rows := 0
+var height := 0.0 # طول العالم كله (فوگ الأرض + تحت الأرض)
+var surface_row := 0 # أول صف تحت الشاشة الأصلية (من هنا كلشي تراب حتى بالحفر)
 var cells := PackedByteArray()
 var _orig := PackedByteArray() # الأرض الأصلية (حتى نرجعها بكل جولة، ورسم الحفر)
 var brick_hp := {} # رقم المربع ← الصحة الباقية
@@ -103,16 +106,23 @@ var brick_hp := {} # رقم المربع ← الصحة الباقية
 
 func build_cells() -> void:
 	cols = ceili(width / CELL)
-	rows = ceili(Config.AH / CELL)
+	surface_row = ceili(Config.AH / CELL)
+	rows = surface_row + DEPTH
+	height = rows * CELL
 	cells.resize(cols * rows)
 	cells.fill(EMPTY)
+	# تحت الأرض: تراب بكل مكان (حتى تحت الحفر الطبيعية)، وآخر صفّين صخر
+	for r in range(surface_row, rows):
+		for c in cols:
+			cells[r * cols + c] = ROCK if r >= rows - 2 else DIRT
 	for g in ground:
 		var c0 := int(ceil(g.x0 / CELL - 0.5))
 		var c1 := int(floor(g.x1 / CELL - 0.5))
 		var r0 := int(g.y / CELL)
 		for c in range(maxi(0, c0), mini(cols - 1, c1) + 1):
 			for r in range(r0, rows):
-				cells[r * cols + c] = ROCK if r >= rows - 2 else DIRT
+				if cells[r * cols + c] == EMPTY:
+					cells[r * cols + c] = DIRT
 	_orig = cells.duplicate()
 
 
@@ -175,7 +185,7 @@ func ground_at(x: float):
 
 # أول سطح (أرض أو منصة) تحت النقطة
 func surface_below(x: float, y: float) -> float:
-	var best := Config.AH + 400
+	var best := height + 400
 	var c := int(floor(x / CELL))
 	if c >= 0 and c < cols:
 		for r in range(maxi(0, int(ceil((y - 4) / CELL))), rows):

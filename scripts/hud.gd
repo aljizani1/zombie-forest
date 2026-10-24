@@ -39,6 +39,12 @@ func _draw() -> void:
 	var s := size
 	var p := game.me()
 
+	# تحت الأرض: كل ما تنزل أعمق الشاشة تظلم أكثر (مثل الكهف)
+	var depth := maxi(0, int((p.y + p.h - 620) / World.CELL)) # بالمربعات تحت مستوى الأرض
+	if depth > 0:
+		draw_rect(Rect2(Vector2.ZERO, s), Color(0, 0, 0, clampf(depth / 90.0, 0, 0.55)))
+		_edges(s, Color(0, 0, 0, clampf(depth / 60.0, 0, 0.6)))
+
 	# ظلمة الأطراف + حمرة لمن تنضرب
 	var hurt := p.inv > 0.35 or p.hp <= 0
 	_edges(s, Color(0, 0, 0, 0.25))
@@ -71,11 +77,14 @@ func _draw() -> void:
 	var ammo := ""
 	if Game.is_gun(p.weapon):
 		ammo = "تعبئة..." if p.reload > 0 else "%d / %d" % [p.ammo[p.weapon], Config.WEAPONS[p.weapon].mag]
-	elif p.weapon == "brick" or p.weapon == "shovel":
-		ammo = "طابوق %d" % p.bricks
+	elif p.weapon == "brick":
+		ammo = "عندك %d" % p.bricks
 	_text(wname, Vector2(26, 92), 19)
 	_text(ammo, Vector2(110, 92), 19, Color("#ffd23f") if p.reload > 0 else Color.WHITE)
 	_text("رمانة %d" % p.grenades, Vector2(186, 92), 19)
+	if depth > 0:
+		_panel(Rect2(s.x - 164, 64, 150, 40))
+		_text("العمق: %d" % depth, Vector2(s.x - 150, 92), 20, Color("#ffd23f"))
 
 
 # ظلمة على أطراف الشاشة

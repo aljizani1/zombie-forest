@@ -92,7 +92,7 @@ func _ready() -> void:
 	cam.limit_left = 0
 	cam.limit_right = int(world.width)
 	cam.limit_top = 0
-	cam.limit_bottom = int(Config.AH)
+	cam.limit_bottom = int(world.height)
 	cam.anchor_mode = Camera2D.ANCHOR_MODE_FIXED_TOP_LEFT
 	add_child(cam)
 	cam.position = Vector2(world.start.x - 640, 0)
@@ -638,6 +638,7 @@ func _begin(g: Game) -> void:
 	touch.visible = _use_touch
 	_ended = false
 	cam.position.x = clampf(game.me().x + Game.PW / 2 - _view_w() / 2, 0, world.width - _view_w())
+	cam.position.y = 0
 
 
 func _view_w() -> float:
@@ -757,6 +758,12 @@ func _process(delta: float) -> void:
 	var vw := _view_w()
 	var target := clampf(game.me().x + Game.PW / 2 - vw / 2, 0, maxf(0, world.width - vw))
 	cam.position.x += (target - cam.position.x) * minf(1.0, dt * 7)
+	# تحت الأرض: الكاميرا تنزل وياك (فوگ الأرض تبقى على السما)، وكل ما تنزل أكثر تخلّيك بنص الشاشة
+	var vh := get_viewport().get_visible_rect().size.y
+	var feet := game.me().y + Game.PH
+	var down := maxf(0.0, feet - 620)
+	var ty := clampf(down + clampf(down * 0.8, 0, 260), 0, world.height - vh)
+	cam.position.y += (ty - cam.position.y) * minf(1.0, dt * 8)
 	cam.offset = Vector2(randf_range(-0.5, 0.5), randf_range(-0.25, 0.25)) * game.shake * 30 if game.shake > 0 else Vector2.ZERO
 
 
@@ -964,6 +971,13 @@ func _auto_play(delta: float) -> void:
 			if _shot_t < delta * 1.5:
 				me.x += 520
 				me.y = 620 - Game.PH
+		if OS.get_cmdline_user_args().has("--deep"):
+			inp.aim = PI / 2
+			if _shot_t > 9.0:
+				print("deep test: depth=", int((me.y + Game.PH - 620) / World.CELL), " cam_y=", cam.position.y)
+				get_viewport().get_texture().get_image().save_png(_shot)
+				get_tree().quit()
+			return
 		if _shot_t < 2.5:
 			inp.aim = PI / 2 if _shot_t < 1.2 else 0.3
 		elif _shot_t < 4.0:

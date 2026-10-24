@@ -124,7 +124,7 @@ func _coin(c: Vector2, r: float, a: float) -> void:
 
 func _shadow(x: float, feet: float, w: float) -> void:
 	var ground := game.map.surface_below(x, feet)
-	if ground > Config.AH:
+	if ground > game.map.height:
 		return
 	var k := maxf(0.3, 1 - (ground - feet) / 300)
 	g.fill(Painter.ellipse_pts(Vector2(x, ground + 2), w * k, 6 * k, 0, 16), Color(0, 0, 0, 0.28 * k))

@@ -100,7 +100,7 @@ func setup(m: World) -> void:
 
 	# ── ظلمة الحفر ──
 	var abyss := _node(self, func(ci) -> void:
-		_vgrad(ci, 0, map.width, AH - 90, AH + 400, [Color(0.08, 0.05, 0.04, 0), Color(0.08, 0.05, 0.04, 0.85), Color(0.08, 0.05, 0.04, 0.95)], [0.0, 0.25, 1.0]))
+		_vgrad(ci, 0, map.width, AH - 90, AH + 2, [Color(0.08, 0.05, 0.04, 0), Color(0.08, 0.05, 0.04, 0.85), Color(0.08, 0.05, 0.04, 0.95)], [0.0, 0.25, 1.0]))
 	abyss.z_index = -1
 
 	# ── قطع الأرض (كل شي ينحط بالقطعة اللي بيها نصه) ──
@@ -149,7 +149,7 @@ func _process(_dt: float) -> void:
 
 func _parallax(f: float, auto: Vector2, fn: Callable) -> void:
 	var p := Parallax2D.new()
-	p.scroll_scale = Vector2(f, 0)
+	p.scroll_scale = Vector2(f, 1) # عمودياً تتحرك ويا العالم (لمن الكاميرا تنزل تحت الأرض)
 	p.repeat_size = Vector2(STRIP, 0)
 	p.repeat_times = 3
 	p.autoscroll = auto

@@ -200,7 +200,7 @@ func _make_player(id: String, name: String, uniform: Color, weapon: String, slot
 	p.w = PW
 	p.h = PH
 	p.x = clampf(map.start.x - PW / 2 + (1 if slot % 2 else -1) * ceili(slot / 2.0) * 70, 0, map.width - PW)
-	p.y = minf(map.surface_below(p.x + PW / 2, map.start.y - 200), Config.AH) - PH
+	p.y = minf(map.surface_below(p.x + PW / 2, map.start.y - 200), map.height) - PH
 	p.hp = Config.PLAYER.hp
 	p.max_hp = p.hp
 	p.weapon = weapon
@@ -437,7 +437,7 @@ func explode(gr: Grenade) -> void:
 		q.smoke = true
 		parts.append(q)
 	var top := map.surface_below(gr.x, gr.y - 20)
-	if top < Config.AH:
+	if top < map.height:
 		decals.append({x = gr.x, y = top + 3, r = 46.0, life = 8.0, burn = true})
 	if not authority:
 		return
@@ -489,7 +489,7 @@ func update_grenades(dt: float) -> void:
 		gr.t -= dt
 		if gr.t <= 0:
 			explode(gr)
-	grenades = grenades.filter(func(gr): return gr.t > 0 and gr.y < Config.AH + 300)
+	grenades = grenades.filter(func(gr): return gr.t > 0 and gr.y < map.height + 300)
 	for b in booms:
 		b.t += dt
 	booms = booms.filter(func(b): return b.t < 0.7)
@@ -511,7 +511,7 @@ func slots(p: Player) -> Array:
 
 
 func fell_in_pit(p: Player) -> void:
-	if p.y <= Config.AH + 150:
+	if p.y <= map.height + 150:
 		return
 	p.x = p.safe.x
 	p.y = p.safe.y - 40
@@ -714,7 +714,7 @@ func spawn_spot(z: Zombie) -> Dictionary:
 			return {x = x, y = top, face = face_of.call(x)}
 	var edge := map.width - z.w if ax < map.width / 2 else z.w
 	var et = map.ground_at(edge)
-	return {x = edge, y = et if et != null else minf(map.surface_below(edge, 0), Config.AH), face = face_of.call(edge)}
+	return {x = edge, y = et if et != null else minf(map.surface_below(edge, 0), map.height), face = face_of.call(edge)}
 
 
 func new_zombie(id: int, kind: String) -> Zombie:
@@ -883,7 +883,7 @@ func death_fx(z: Zombie, dir: float) -> void:
 	splash(z.x + z.w / 2, z.y + z.h * 0.35, 14, [Color("#7a1212"), Color("#4b1010"), Color("#5d6b2a")], dir, 4)
 	var dx := z.x + z.w / 2 + dir * 30
 	var top := map.surface_below(dx, z.y + z.h - 20)
-	if top < Config.AH and z.kind != "flyer":
+	if top < map.height and z.kind != "flyer":
 		decals.append({x = dx, y = top + 3, r = 18 + randf() * 14, life = 6.0, burn = false})
 	sounds.append("die")
 
@@ -989,7 +989,7 @@ func step(inp: Inp, dt: float) -> void:
 			zombie_ai(z, dt)
 			physics(z, dt)
 			# وگع بحفرة: ينحسب مقتول (بدون فلوس)
-			if z.y > Config.AH + 150:
+			if z.y > map.height + 150:
 				z.dead = 5
 				killed += 1
 		if z.on_ground or z.kind == "flyer" or not authority:
@@ -1043,7 +1043,7 @@ func step(inp: Inp, dt: float) -> void:
 			hit.kb = dir * (50.0 if hit.kind == "brute" else 140.0)
 			if hit.hp <= 0:
 				kill_zombie(hit, b.owner, dir)
-	bullets = bullets.filter(func(b): return b.life > 0 and b.x > -500 and b.x < map.width + 500 and b.y > -600 and b.y < Config.AH + 100)
+	bullets = bullets.filter(func(b): return b.life > 0 and b.x > -500 and b.x < map.width + 500 and b.y > -600 and b.y < map.height + 100)
 
 	update_grenades(dt)
 
