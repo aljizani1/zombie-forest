@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>زومبي الغابة</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;900&display=swap" rel="stylesheet">
+<style>
+  :root { --bg1: #3d84c6; --bg2: #cbe7f1; --ground: #56391f; --grass: #6db43f; --red: #c62828; --gold: #ffd23f; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; font-family: Cairo, Tahoma, sans-serif; color: #fff;
+    background: linear-gradient(var(--bg1), var(--bg2) 70%, var(--grass) 70%, var(--grass) 73%, var(--ground) 73%);
+    display: flex; align-items: center; justify-content: center; padding: 16px; text-align: center;
+  }
+  .card { background: rgba(0,0,0,.45); border-radius: 24px; padding: 32px 24px; max-width: 440px; width: 100%; }
+  h1 { margin: 0 0 4px; font-size: 44px; font-weight: 900; color: var(--gold); text-shadow: 0 3px 0 #000; }
+  p { margin: 0 0 24px; font-size: 18px; opacity: .9; }
+  a.dl {
+    display: block; background: var(--red); color: #fff; text-decoration: none; font-size: 28px; font-weight: 900;
+    padding: 18px; border-radius: 16px; border: 3px solid #fff; box-shadow: 0 5px 0 rgba(0,0,0,.4);
+  }
+  a.dl:active { transform: translateY(3px); box-shadow: 0 2px 0 rgba(0,0,0,.4); }
+  .help { margin-top: 20px; font-size: 15px; line-height: 1.8; opacity: .85; text-align: right; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>زومبي الغابة</h1>
+    <p>لعبة أكشن ضد الزومبي للأندرويد</p>
+    <a class="dl" href="https://github.com/aljizani1/zombie-forest/releases/latest/download/zombie-forest.apk">تحميل APK</a>
+    <div class="help">
+      بعد التحميل افتح الملف واضغط <b>تثبيت</b>.<br>
+      إذا طلب منك، اسمح بـ <b>تثبيت تطبيقات من مصادر غير معروفة</b> للمتصفح.
+    </div>
+  </div>
+</body>
+</html>
