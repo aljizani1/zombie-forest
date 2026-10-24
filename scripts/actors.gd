@@ -6,6 +6,8 @@ const PW := Game.PW
 const PH := Game.PH
 
 var game: Game
+var _lo := -INF # حدود الشاشة (مع هامش) بالعالم
+var _hi := INF
 var font: Font
 var g: Painter
 
@@ -23,6 +25,12 @@ func _draw() -> void:
 		return
 	g.begin()
 	var t := game.time
+	# الأشياء البعيدة عن الشاشة ما نرسمها (أغلب الزومبي يطلعون برّه الشاشة)
+	var cam := get_viewport().get_camera_2d()
+	var vw := get_viewport().get_visible_rect().size.x
+	var cx := cam.get_screen_center_position().x if cam != null else vw / 2
+	_lo = cx - vw / 2 - 200
+	_hi = cx + vw / 2 + 200
 	if game.plane != null:
 		Rig.draw_plane(g, game.plane.x, game.plane.y, game.plane.dir, t)
 	# دم وحروق على الأرض
@@ -31,20 +39,31 @@ func _draw() -> void:
 		g.fill(Painter.ellipse_pts(Vector2(d.x, d.y), d.r, d.r * 0.22, 0, 16), col)
 	# الميتين ورا
 	for z in game.zs:
-		if z.dead > 0:
+		if z.dead > 0 and _seen(z.x + z.w / 2):
 			_draw_zombie(z, t)
 	for z in game.zs:
-		if z.dead == 0:
+		if z.dead == 0 and _seen(z.x + z.w / 2):
 			_draw_zombie(z, t)
 	for i in range(game.players.size() - 1, -1, -1):
-		_draw_player(game.players[i], t)
+		var p: Game.Player = game.players[i]
+		if _seen(p.x):
+			_draw_player(p, t)
 
 	# الطلق
+	# الطلق: خط مضوي (هالة عريضة خفيفة + قلب رفيع لامع) يطول حسب السرعة، ورأس يلمع
 	for b in game.bullets:
-		var tail := Vector2(b.x - b.vx * 0.03, b.y - b.vy * 0.03)
-		var n := Vector2(-b.vy, b.vx).normalized() * 1.5
+		if not _seen(b.x):
+			continue
 		var head := Vector2(b.x, b.y)
-		g.b.draw_polygon(PackedVector2Array([tail + n, head + n, head - n, tail - n]), PackedColorArray([Color(1, 0.78, 0.31, 0), Color(1, 0.96, 0.78, 1), Color(1, 0.96, 0.78, 1), Color(1, 0.78, 0.31, 0)]))
+		var dir := Vector2(b.vx, b.vy) * 0.045
+		var tail := head - dir
+		var nn := Vector2(-b.vy, b.vx).normalized()
+		var glow := nn * 3.5
+		g.b.draw_polygon(PackedVector2Array([tail, head + glow, head + dir * 0.06, head - glow]), PackedColorArray([Color(1, 0.6, 0.2, 0), Color(1, 0.75, 0.3, 0.35), Color(1, 0.8, 0.4, 0.35), Color(1, 0.75, 0.3, 0.35)]))
+		var core := nn * 1.2
+		var mid := head - dir * 0.55
+		g.b.draw_polygon(PackedVector2Array([mid + core * 0.3, head + core, head - core, mid - core * 0.3]), PackedColorArray([Color(1, 0.85, 0.5, 0), Color(1, 1, 0.9, 1), Color(1, 1, 0.9, 1), Color(1, 0.85, 0.5, 0)]))
+		g.b.draw_circle(head, 2.2, Color(1, 1, 0.92, 0.95))
 
 	# الرمانات
 	for gr in game.grenades:
@@ -62,6 +81,8 @@ func _draw() -> void:
 
 	# دم وظروف طلق وغبار ودخان
 	for q in game.parts:
+		if not _seen(q.x):
+			continue
 		var col := q.color
 		col.a = minf(1.0, q.life / q.max * 2)
 		if q.shell:
@@ -210,3 +231,7 @@ func _draw_zombie(z: Game.Zombie, t: float) -> void:
 	if z.dead == 0 and z.hp < z.max:
 		var w := 96.0 if z.kind == "monster" else (70.0 if z.kind == "brute" else 44.0)
 		_bar(cx, z.y - 18, w, z.hp / z.max, Color("#e53935"))
+
+
+func _seen(x: float) -> bool:
+	return x > _lo and x < _hi

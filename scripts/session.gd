@@ -8,8 +8,8 @@ class_name Session
 extends Node
 
 signal roster_changed
-signal started(stage: int)
-signal to_lobby(stage: int)
+signal started(level: float)
+signal to_lobby(level: float)
 signal state_msg(m: Dictionary) # حالة لاعب
 signal snap_msg(s: Dictionary) # سنابشوت المضيف
 signal closed(why: String)
@@ -28,7 +28,7 @@ var room_name := ""
 var is_host := false
 var me := {} # {id, name, host, joinedAt}
 var members: Array = [] # مرتبين حسب وقت الدخول
-var stage := 0
+var level := 1.0 # صعوبة الجولة (المضيف يقررها)
 var playing := false
 var token := ""
 var peers := {} # id ← {pc, dc, pending}
@@ -184,9 +184,9 @@ func _on_presence() -> void:
 			_known[m.id] = true
 			# اللي ينضم واللعب شغّال يدخل وياهم بنفس المرحلة
 			if playing:
-				ch.send("start", {stage = stage, to = m.id})
+				ch.send("start", {level = level, to = m.id})
 			else:
-				ch.send("lobby", {stage = stage, name = room_name})
+				ch.send("lobby", {level = level, name = room_name})
 		_heartbeat()
 	roster_changed.emit()
 
@@ -204,15 +204,15 @@ func _on_broadcast(event: String, p: Variant) -> void:
 		"start":
 			if p.has("to") and p.to != me.id:
 				return
-			stage = int(p.stage)
+			level = float(p.get("level", 1))
 			playing = true
-			started.emit(stage)
+			started.emit(level)
 		"lobby":
-			stage = int(p.stage)
+			level = float(p.get("level", 1))
 			if p.has("name"):
 				room_name = p.name
 			playing = false
-			to_lobby.emit(stage)
+			to_lobby.emit(level)
 		"bye":
 			_close("المضيف سكّر السيرفر")
 
@@ -357,32 +357,30 @@ func _process(dt: float) -> void:
 
 
 # ── المضيف يتحكم ──
-func start(st: int) -> void:
+func start(lv: float) -> void:
 	if not is_host:
 		return
-	stage = st
+	level = lv
 	playing = true
-	ch.send("start", {stage = st})
+	ch.send("start", {level = lv})
 	_heartbeat()
-	started.emit(st)
+	started.emit(lv)
 
 
-func back_to_lobby(st := -1) -> void:
+func back_to_lobby() -> void:
 	if not is_host:
 		return
-	if st >= 0:
-		stage = st
 	playing = false
-	ch.send("lobby", {stage = stage, name = room_name})
+	ch.send("lobby", {level = level, name = room_name})
 	_heartbeat()
-	to_lobby.emit(stage)
+	to_lobby.emit(level)
 
 
 func _heartbeat() -> void:
 	_beat = 0
 	if not is_host or token == "" or _closed:
 		return
-	supa.call_fn("room_heartbeat", {p_code = code, p_token = token, p_players = members.size(), p_status = "playing" if playing else "lobby", p_stage = stage})
+	supa.call_fn("room_heartbeat", {p_code = code, p_token = token, p_players = members.size(), p_status = "playing" if playing else "lobby", p_stage = clampi(int(level), 0, 20)})
 
 
 func _close(why: String) -> void:

@@ -55,7 +55,7 @@ func _draw() -> void:
 	# المرحلة والقتل
 	var mid := s.x / 2
 	_panel(Rect2(mid - 130, 12, 260, 44))
-	var t := "المرحلة %d   -   %d / %d" % [game.stage + 1, game.killed, game.total]
+	var t := "الصعوبة %.1f   -   %d / %d" % [game.level, game.killed, game.total]
 	var w := font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x
 	_text(t, Vector2(mid - w / 2, 41), 20)
 

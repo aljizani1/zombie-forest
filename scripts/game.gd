@@ -120,7 +120,12 @@ class Inp:
 
 
 var map: World
-var stage := 0
+var level := 1.0 # الصعوبة (تتغير بعد كل جولة)
+var cfg := {} # إعدادات الجولة حسب الصعوبة
+var min_hp := {} # أقل صحة (نسبة) وصلها كل لاعب بهاي الجولة
+var my_kills := 0
+var my_headshots := 0
+var took_damage := false
 var time := 0.0
 var players: Array[Player] = []
 var zs: Array[Zombie] = []
@@ -150,13 +155,14 @@ var plane = null # {x, y, dir, drop_x, dropped}
 
 
 # who = {id, name, uniform} للاعب المحلي، net = لعب جماعي، slot = ترتيبه (حتى ما يطلعون فوگ بعض)
-func _init(m: World, stage_i: int, owned_list: Array, weapon: String, who := {}, is_authority := true, net := false, slot := 0) -> void:
+func _init(m: World, level_v: float, owned_list: Array, weapon: String, who := {}, is_authority := true, net := false, slot := 0) -> void:
 	map = m
-	stage = stage_i
+	level = maxf(1.0, level_v)
+	cfg = Config.level_cfg(level)
 	owned = owned_list
 	authority = is_authority
 	networked = net
-	total = Config.STAGES[stage].total
+	total = cfg.total
 	me_id = who.get("id", "me")
 	var mine := _make_player(me_id, who.get("name", "أنا"), who.get("uniform", Color("#8a7d4f")), weapon if owned.has(weapon) else "pistol", slot)
 	mine.local = true
@@ -177,7 +183,7 @@ func humans() -> Array:
 
 
 func earned() -> int:
-	return int(credits.get(me_id, 0)) + (Config.CLEAR_BONUS * (stage + 1) if status == "won" else 0)
+	return int(credits.get(me_id, 0)) + (Config.CLEAR_BONUS * ceili(level) if status == "won" else 0)
 
 
 func _make_player(id: String, name: String, uniform: Color, weapon: String, slot := 0) -> Player:
@@ -613,7 +619,7 @@ func bot_ai(p: Player, dt: float) -> void:
 
 # ── الزومبي ──
 func spawn_zombie() -> void:
-	var mix: Dictionary = Config.STAGES[stage].mix
+	var mix: Dictionary = cfg.mix
 	var sum := 0.0
 	for k in mix:
 		sum += mix[k]
@@ -631,8 +637,8 @@ func spawn_zombie() -> void:
 	z.y = spot.y - z.h
 	z.face = spot.face
 	var cfg: Dictionary = Config.ZOMBIES[kind]
-	z.speed = randf_range(cfg.speed[0], cfg.speed[1]) * (1 + stage * 0.03)
-	z.hp = roundf(cfg.hp * (1 + stage * Config.HP_PER_STAGE) * 10) / 10
+	z.speed = randf_range(cfg.speed[0], cfg.speed[1]) * self.cfg.speed_mult
+	z.hp = roundf(cfg.hp * self.cfg.hp_mult * 10) / 10
 	z.max = z.hp
 	if kind == "flyer":
 		z.on_ground = false
@@ -802,6 +808,8 @@ func kill_zombie(z: Zombie, owner: String, dir: float) -> void:
 	killed += 1
 	var c: int = Config.ZOMBIES[z.kind].coins
 	credits[owner] = int(credits.get(owner, 0)) + c
+	if owner == me_id:
+		my_kills += 1
 	kills.append([roundi(z.x + z.w / 2), roundi(z.y), c, owner])
 	if owner != "bot":
 		pops.append({x = z.x + z.w / 2, y = z.y, text = "+%d" % c, life = 1.2, head = false, mine = owner == me_id})
@@ -854,6 +862,14 @@ func step(inp: Inp, dt: float) -> void:
 				if p.ammo[p.weapon] <= 0:
 					start_reload(p)
 	players = players.filter(func(p): return not (p.bot and p.dead > 3))
+	# أقل صحة وصلها كل لاعب (للصعوبة الجاية)
+	if status == "play":
+		for p in players:
+			if not p.bot:
+				var r := clampf(p.hp / p.max_hp, 0, 1)
+				min_hp[p.id] = minf(min_hp.get(p.id, 1.0), r)
+				if p.local and r < 1:
+					took_damage = true
 
 	# ── البوت المساعد: طيارة تنزله بنص المرحلة (مو بكل لعبة) ──
 	if status == "play" and helper_at != null and float(killed) / total >= helper_at:
@@ -863,7 +879,7 @@ func step(inp: Inp, dt: float) -> void:
 
 	# ── ظهور الزومبي (يزيدون كل ما تتقدم بالمرحلة، وأكثر إذا أكو لاعبين أكثر) ──
 	if authority and status == "play":
-		var st: Dictionary = Config.STAGES[stage]
+		var st: Dictionary = cfg
 		var prog := float(spawned) / total
 		var living := 0
 		for z in zs:
@@ -947,6 +963,7 @@ func step(inp: Inp, dt: float) -> void:
 		if head:
 			sounds.append("headshot")
 			if b.owner == me_id:
+				my_headshots += 1
 				pops.append({x = hit.x + hit.w / 2, y = hit.y - 18, text = "هيدشوت!", life = 0.9, head = true, mine = true})
 		else:
 			sounds.append("hit")
@@ -1154,6 +1171,8 @@ func apply_snapshot(s: Dictionary) -> void:
 		p.hp = hp
 	for e in s.get("ev", []):
 		var owner := str(e[3])
+		if owner == me_id:
+			my_kills += 1
 		if owner != "bot":
 			pops.append({x = float(e[0]), y = float(e[1]), text = "+%d" % int(e[2]), life = 1.2, head = false, mine = owner == me_id})
 		for q in zs:
@@ -1165,3 +1184,18 @@ func apply_snapshot(s: Dictionary) -> void:
 		status = st
 		if st != "play":
 			sounds.append("win" if st == "won" else "lose")
+
+
+# معدّل أقل صحة لكل اللاعبين (للصعوبة الجاية)
+func min_hp_avg() -> float:
+	if min_hp.is_empty():
+		return 1.0
+	var sum := 0.0
+	for k in min_hp:
+		sum += min_hp[k]
+	return sum / min_hp.size()
+
+
+# الصعوبة الجاية بعد ما تخلص الجولة
+func next_level() -> float:
+	return Config.next_level(level, status == "won", min_hp_avg(), time)

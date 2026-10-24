@@ -54,3 +54,55 @@ const STAGES := [
 	{total = 105, max_alive = 19, every = [0.35, 0.7], mix = {tough = 0.32, runner = 0.2, flyer = 0.18, brute = 0.16, monster = 0.14}},
 	{total = 120, max_alive = 20, every = [0.32, 0.65], mix = {tough = 0.3, runner = 0.2, flyer = 0.18, brute = 0.16, monster = 0.16}},
 ]
+
+
+# ════════ الصعوبة التكيفية (بدال المراحل الثابتة) ════════
+# الصعوبة رقم يبدي من 1 ويصعد/ينزل بعد كل جولة حسب لعبك (next_level).
+# إعدادات الجولة تنحسب من جدول STAGES بالتدريج بين صفّين، وبعد 15 تكمل تصعد بدون حد.
+func level_cfg(level: float) -> Dictionary:
+	level = maxf(1.0, level)
+	var x := clampf(level - 1, 0, STAGES.size() - 1)
+	var i := int(x)
+	var j := mini(i + 1, STAGES.size() - 1)
+	var f := x - i
+	var a: Dictionary = STAGES[i]
+	var b: Dictionary = STAGES[j]
+	var over := maxf(0.0, level - STAGES.size()) # فوگ آخر صف
+	var mix := {}
+	for k in a.mix:
+		mix[k] = a.mix[k] * (1 - f)
+	for k in b.mix:
+		mix[k] = mix.get(k, 0.0) + b.mix[k] * f
+	return {
+		total = roundi(lerpf(a.total, b.total, f) + over * 8),
+		max_alive = roundi(lerpf(a.max_alive, b.max_alive, f) + over),
+		every = [lerpf(a.every[0], b.every[0], f) / (1 + over * 0.05), lerpf(a.every[1], b.every[1], f) / (1 + over * 0.05)],
+		mix = mix,
+		hp_mult = 1 + (level - 1) * HP_PER_STAGE,
+		speed_mult = 1 + minf(level - 1, 25) * 0.03,
+	}
+
+
+# الوقت المتوقع للجولة (بالثواني) حتى نعرف إذا خلصتها بسرعة
+func expected_time(level: float) -> float:
+	var c := level_cfg(level)
+	return c.total * (c.every[0] + c.every[1]) / 2.0 * 0.85 + 12
+
+
+# الصعوبة الجاية حسب:
+#  1) أقل صحة وصلها اللاعب بالجولة (بالجماعي: معدّل كل اللاعبين). إذا بقت فوگ النص بوضوح = نصعّب
+#  2) سرعة إنهاء الجولة. كل ما أسرع = نصعّب أكثر
+# التغيير تدريجي، والخسارة ترجّع شوية لورا
+func next_level(level: float, won: bool, min_hp: float, seconds: float) -> float:
+	var d := 0.0
+	if not won:
+		d = -0.6
+	else:
+		d = 0.3
+		if min_hp > 0.5:
+			d += (min_hp - 0.5) * 1.2
+		elif min_hp < 0.25:
+			d -= 0.3
+		var speed := expected_time(level) / maxf(5.0, seconds)
+		d += clampf((speed - 1) * 0.5, -0.2, 0.4)
+	return snappedf(clampf(level + d, 1, 99), 0.1)

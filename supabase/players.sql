@@ -1,0 +1,22 @@
+-- ════════ اللاعبين + المتصدرين + الأدمن ════════
+-- هذا الملف للمرجع: مطبّق على مشروع Supabase "sp-game" (migrations: players_leaderboard_admin, players_pin_lockout*).
+-- الجداول مقفولة (RLS بدون policies) وكلشي يمر من الدوال (security definer) اللي تتأكد من التوكن أو الرمز.
+
+-- players: name (فريد بدون فرق الحروف الكبيرة/الصغيرة)، pin_hash (bcrypt، اختياري)، token (يتغير لمن يتغير الرمز)،
+--   level/best_level (الصعوبة)، kills، headshots، rounds، wins، online_rounds، play_seconds، achievements[]،
+--   created_at، last_seen، fails/locked_until (قفل 10 دقايق بعد 5 رموز غلط)
+-- rounds: سجل كل جولة (للنشاط ولوحة الأدمن)
+-- admins: أسماء الأدمن. الأدمن لازم حسابه عليه رمز حتى تشتغل لوحته.
+--   إضافة أدمن:  insert into public.admins (name) values ('الاسم');
+
+-- الدوال (كلها تنادى من اللعبة عبر /rest/v1/rpc/...):
+-- player_login(p_name, p_pin)         → {ok, token, name, has_pin, level, admin} أو {ok:false, error: short|pin|bad_pin|locked}
+--                                        الاسم الجديد ينصنع تلقائياً. الاسم بدون رمز = أي واحد يدخل بيه.
+-- player_resume(p_token)              → نفس اللي فوگ (رجوع بالتوكن المحفوظ بالجهاز)
+-- player_set_pin(p_token, p_pin)      → {ok, token} (فارغ = نشيل الرمز). الرمز 4-8 أرقام، والتوكن يتبدل
+-- player_report(p_token, p_kills, p_headshots, p_seconds, p_level, p_next_level, p_won, p_online, p_achievements)
+--                                     → نهاية جولة: إحصائيات + الصعوبة الجاية + إنجازات + سجل بـ rounds
+-- player_touch(p_token)               → آخر ظهور (كل دقيقة واللعبة مفتوحة)
+-- leaderboard(p_limit)                → الأوائل حسب عدد الزومبي المقتولين
+-- player_profile(p_name)              → الملف الشخصي (للكل)
+-- admin_overview(p_token)             → لوحة الأدمن: عدد اللاعبين، الأونلاين هسه، جولات اليوم، السيرفرات، آخر 200 لاعب
