@@ -87,6 +87,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_label = Label.new()
 	_label.position = Vector2(10, 150)
+	_label.layout_direction = Control.LAYOUT_DIRECTION_LTR # الأرقام من اليسار (اللعبة عربية فالافتراضي يمين)
+	_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_label.add_theme_font_size_override("font_size", 16)
 	_label.add_theme_color_override("font_color", Color("#9cff6a"))
 	_label.add_theme_color_override("font_outline_color", Color.BLACK)
