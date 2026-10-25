@@ -268,6 +268,7 @@ func _warm_up() -> void:
 		shown.append(n)
 		i += 1
 	me().node.set_flash(true)
+	me().node.show_all_guns(true)
 	_flash.position = c + Vector3(0, 1.2, 0)
 	_flash.visible = true
 	var ball := _boom_nodes[0]
@@ -301,6 +302,7 @@ func _warm_up() -> void:
 		n.set_flash(false)
 		n.visible = false
 	me().node.set_flash(false)
+	me().node.show_all_guns(false)
 	_flash.visible = false
 	ball.visible = false
 	ball.transparency = 0.0

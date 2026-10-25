@@ -246,10 +246,37 @@ func set_gun(id: String) -> void:
 	if gun.get_node_or_null("Muzzle") == null:
 		var mk := Marker3D.new()
 		mk.name = "Muzzle"
-		var ab: AABB = (gun as MeshInstance3D).get_aabb()
-		mk.position = Vector3(ab.end.x, ab.get_center().y, ab.get_center().z)
+		mk.position = _barrel_tip(gun.mesh)
 		gun.add_child(mk)
 	muzzle = gun.get_node("Muzzle")
+
+
+# وقت التحميل: كل الأسلحة تبين حتى موادها تتجهز (بعدين يرجع بس المختار)
+func show_all_guns(on: bool) -> void:
+	for id in GUNS:
+		var g: Node3D = _guns.get(GUNS[id])
+		if g != null:
+			g.visible = on or g == gun
+
+
+# راس السبطانة: أطول محور بالسلاح، الطرف الأبعد عن الإيد (الإيد عند الصفر)، ومعدّل النقاط اللي يمه
+static func _barrel_tip(m: Mesh) -> Vector3:
+	var ab := m.get_aabb()
+	var ax := ab.get_longest_axis_index()
+	var lo := ab.position[ax]
+	var hi := ab.end[ax]
+	var far := hi if absf(hi) > absf(lo) else lo
+	var band := (hi - lo) * 0.06
+	var sum := Vector3.ZERO
+	var n := 0
+	for si in m.get_surface_count():
+		for v: Vector3 in m.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]:
+			if absf(v[ax] - far) < band:
+				sum += v
+				n += 1
+	var tip := sum / maxi(n, 1)
+	tip[ax] = far
+	return tip
 
 
 # لمعة بيضة لمن ينضرب (طبقة فوگ المادة، ما نبدل المواد) + حركة انضراب قصيرة
