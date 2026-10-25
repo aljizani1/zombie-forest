@@ -5,6 +5,7 @@ class_name Game3D
 extends Node3D
 
 const H := preload("res://scripts3d/humanoid.gd")
+const Fx := preload("res://scripts3d/fx.gd")
 const PX := 1.0 / 60.0 # تحويل السرعات القديمة (بكسل/ث) لمتر/ث
 const P_SPEED := 5.2
 const P_R := 0.4
@@ -117,16 +118,18 @@ var _p_over := 0
 var _part_mm: MultiMesh
 var _decals := [] # {p, r, life}
 var _decal_mm: MultiMesh
+var _dbuf := PackedFloat32Array() # 20 رقم لكل بقعة (تحويل + لون + بذرة الشكل)
 var _nades := [] # {p: Vector3, v: Vector3, t, node, owner}
-var _booms := [] # {node, t}
+var _booms := [] # {p, t}
 var _pops := [] # {node, life}
 var _flash: MeshInstance3D
+var _flashes: Array[MeshInstance3D] = [] # 3 أشكال جاهزة (ما نغير المادة وقت اللعب)
 # مجموعات جاهزة: كل شي ينبني وقت التحميل، وباللعب بس نخفي ونظهر (ماكو بناء ولا مسح وسط القتال)
 var _zpool := {} # النوع ← [Humanoid مخفي]
 var _pop_nodes: Array[Label3D] = []
 var _nade_nodes: Array[MeshInstance3D] = []
-var _boom_nodes: Array[MeshInstance3D] = []
-var _boom_mat: StandardMaterial3D
+var _boom_mm: MultiMesh # كرات النار (رسمة وحدة)
+var _flash_light: OmniLight3D # ومضة ضوء ويا الطلقة (عالية بس، وبس بالأندرويد: بالمتصفح الضوء النقطي يقطّع)
 var loaded := false # شاشة التحميل خلصت (المجموعات انبنت والمواد تجهزت)
 var _load_ui: CanvasLayer
 var _load_bar: ProgressBar
@@ -159,8 +162,9 @@ func _ready() -> void:
 	m.node = H.new()
 	m.node.build("soldier", {shirt = Color("#6b7040"), helmet = Color("#4f5a34"), gun = m.weapon})
 	add_child(m.node)
-	_bul_mm = _mm(_glow_box(), MAX_BULLETS, true)
-	_part_mm = _mm(H.mesh("sphere", 0.5), MAX_PARTS, true)
+	_bul_mm = _mm(_glow_box(), MAX_BULLETS, true, Fx.mat(Fx.TRACER))
+	_part_mm = _mm(_quad(1.0), MAX_PARTS, true, Fx.mat(Fx.PUFF))
+	_boom_mm = _mm(_quad(1.0), BOOMS, true, Fx.mat(Fx.BOOM))
 	for a in [_pp, _pv]:
 		a.resize(MAX_PARTS)
 	for a in [_pl, _pm, _ps]:
@@ -169,20 +173,33 @@ func _ready() -> void:
 	_psm.resize(MAX_PARTS)
 	_pbuf.resize(MAX_PARTS * 16)
 	_pbuf.fill(0.0)
-	var disc := CylinderMesh.new()
-	disc.top_radius = 1.0
-	disc.bottom_radius = 1.0
-	disc.height = 0.01
-	disc.radial_segments = 14
-	_decal_mm = _mm(disc, 80, true)
+	var splat := PlaneMesh.new()
+	splat.size = Vector2(2, 2)
+	_decal_mm = _mm(splat, 80, true, Fx.mat(Fx.SPLAT), true)
+	_dbuf.resize(80 * 20)
+	_dbuf.fill(0.0)
 	var blob := PlaneMesh.new()
 	blob.size = Vector2(1, 1)
 	_blob_mm = _mm(blob, 64, true, _blob_shader())
-	_flash = MeshInstance3D.new()
-	_flash.mesh = H.mesh("sphere", 0.16)
-	_flash.material_override = H.mat(Color("#ffe9a0"), 0.2, 6.0)
-	_flash.visible = false
-	add_child(_flash)
+	for i in 3:
+		var f := MeshInstance3D.new()
+		f.mesh = _quad(0.9)
+		var fm: ShaderMaterial = Fx.mat(Fx.FLASH).duplicate()
+		fm.set_shader_parameter("variant", float(i))
+		fm.set_shader_parameter("spin", i * 2.1)
+		f.material_override = fm
+		f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		f.visible = false
+		add_child(f)
+		_flashes.append(f)
+	_flash = _flashes[0]
+	if RenderingServer.get_current_rendering_method() != "gl_compatibility":
+		_flash_light = OmniLight3D.new()
+		_flash_light.light_color = Color(1.0, 0.75, 0.4)
+		_flash_light.light_energy = 2.0
+		_flash_light.omni_range = 4.5
+		_flash_light.visible = false
+		add_child(_flash_light)
 	_loading()
 
 
@@ -269,12 +286,14 @@ func _warm_up() -> void:
 		i += 1
 	me().node.set_flash(true)
 	me().node.show_all_guns(true)
-	_flash.position = c + Vector3(0, 1.2, 0)
-	_flash.visible = true
-	var ball := _boom_nodes[0]
-	ball.position = c + Vector3(2, 1, 1)
-	ball.transparency = 0.5
-	ball.visible = true
+	for fi in 3:
+		_flashes[fi].position = c + Vector3(fi * 0.5, 1.2, 0)
+		_flashes[fi].visible = true
+	# الضوء يغطي الحديقة كلها وقت التحميل حتى كل المواد تتجهز ويا ضوء نقطي
+	if _flash_light != null:
+		_flash_light.position = c + Vector3(0, 3, 0)
+		_flash_light.omni_range = 150.0
+		_flash_light.visible = true
 	var texts := ["هيدشوت!", "+0123456789"]
 	for k in texts.size():
 		var l := _pop_nodes[k]
@@ -283,7 +302,7 @@ func _warm_up() -> void:
 		l.visible = true
 	_nade_nodes[0].position = c + Vector3(1, 0.5, 1)
 	_nade_nodes[0].visible = true
-	for mm in [_part_mm, _bul_mm, _decal_mm, _blob_mm]:
+	for mm in [_part_mm, _bul_mm, _decal_mm, _blob_mm, _boom_mm]:
 		mm.visible_instance_count = 1
 		mm.set_instance_transform(0, Transform3D(Basis.IDENTITY, c + Vector3(0, 0.5, 1)))
 		mm.set_instance_color(0, Color(1, 1, 1, 0.5))
@@ -303,13 +322,15 @@ func _warm_up() -> void:
 		n.visible = false
 	me().node.set_flash(false)
 	me().node.show_all_guns(false)
-	_flash.visible = false
-	ball.visible = false
-	ball.transparency = 0.0
+	for f in _flashes:
+		f.visible = false
+	if _flash_light != null:
+		_flash_light.visible = false
+		_flash_light.omni_range = 4.5
 	for l in _pop_nodes:
 		l.visible = false
 	_nade_nodes[0].visible = false
-	for mm in [_part_mm, _bul_mm, _decal_mm, _blob_mm]:
+	for mm in [_part_mm, _bul_mm, _decal_mm, _blob_mm, _boom_mm]:
 		mm.visible_instance_count = 0
 	_load_bar.value = 1.0
 
@@ -334,22 +355,6 @@ func _make_pools() -> void:
 		node.visible = false
 		add_child(node)
 		_nade_nodes.append(node)
-	# مادة الانفجار وحدة للكل، والتلاشي بـ transparency مال كل كرة
-	_boom_mat = StandardMaterial3D.new()
-	_boom_mat.albedo_color = Color(1.0, 0.7, 0.25, 0.9)
-	_boom_mat.emission_enabled = true
-	_boom_mat.emission = Color(1.0, 0.55, 0.15)
-	_boom_mat.emission_energy_multiplier = 3.0
-	_boom_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_boom_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	for i in BOOMS:
-		var ball := MeshInstance3D.new()
-		ball.mesh = H.mesh("sphere", 1.0)
-		ball.material_override = _boom_mat
-		ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		ball.visible = false
-		add_child(ball)
-		_boom_nodes.append(ball)
 
 
 func _new_zombie(kind: String) -> Humanoid:
@@ -386,8 +391,14 @@ func _free_node(nodes: Array, used: Array) -> Node3D:
 
 func _glow_box() -> Mesh:
 	var b := BoxMesh.new()
-	b.size = Vector3(0.05, 0.05, 1.0)
+	b.size = Vector3(0.035, 0.035, 1.0)
 	return b
+
+
+func _quad(size: float) -> Mesh:
+	var q := QuadMesh.new()
+	q.size = Vector2(size, size)
+	return q
 
 
 func _blob_shader() -> ShaderMaterial:
@@ -406,7 +417,7 @@ void fragment() {
 	return m
 
 
-func _mm(mesh: Mesh, n: int, colors: bool, mat_: Material = null) -> MultiMesh:
+func _mm(mesh: Mesh, n: int, colors: bool, mat_: Material = null, custom := false) -> MultiMesh:
 	var m: Material = mat_
 	if m == null:
 		var sm := StandardMaterial3D.new()
@@ -419,6 +430,7 @@ func _mm(mesh: Mesh, n: int, colors: bool, mat_: Material = null) -> MultiMesh:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = colors
+	mm.use_custom_data = custom
 	mm.mesh = mesh
 	mm.instance_count = n
 	mm.visible_instance_count = 0
@@ -579,8 +591,13 @@ func _fire(p: P) -> void:
 	var origin: Vector3 = p.node.muzzle.global_position if p.node.muzzle != null else v3(p.pos, 1.3)
 	var dir := Vector3(cos(a), 0, sin(a))
 	_bul.append({p = origin, v = dir * w.speed * PX, dmg = w.damage, life = 0.9, owner = p.id})
+	_flash.visible = false
+	_flash = _flashes[randi() % 3]
 	_flash.position = origin
 	_flash.visible = true
+	_flash.scale = Vector3.ONE * randf_range(0.8, 1.25)
+	if _flash_light != null:
+		_flash_light.position = origin
 	_flash_t = 0.05
 	# ظرف الطلقة
 	_add_part(origin + Vector3(0, -0.05, 0), Vector3(-dir.z, 0, dir.x) * randf_range(1.5, 2.5) + Vector3(0, 3, 0), 0.7, Color("#d9a441"), 0.04)
@@ -749,7 +766,7 @@ func _kill(z: Z, owner: String) -> void:
 	_pop(v3(z.pos, 2.2 + z.fly), "+%d" % c, Color("#ffd23f"))
 	_splash(v3(z.pos, 1.0 + z.fly), 16, [Color("#7a1212"), Color("#4b1010"), Color("#5d6b2a")])
 	if z.fly == 0:
-		_decals.append({p = v3(z.pos, 0.03), r = randf_range(0.5, 0.9) * z.r / 0.45, life = 10.0})
+		_decals.append({p = v3(z.pos, 0.03), r = randf_range(0.6, 1.0) * z.r / 0.45, life = 10.0, seed = randf()})
 	else:
 		z.fly = 0.0
 	sounds.append("die")
@@ -810,8 +827,8 @@ func _update_bullets(dt: float) -> void:
 	for i in _bul_mm.visible_instance_count:
 		var b: Dictionary = _bul[i]
 		var dir: Vector3 = (b.v as Vector3).normalized()
-		var basis := Basis.looking_at(dir, Vector3.UP).scaled(Vector3(1, 1, 1.4))
-		_bul_mm.set_instance_transform(i, Transform3D(basis, b.p - dir * 0.7))
+		var basis := Basis.looking_at(dir, Vector3.UP) * Basis.from_scale(Vector3(1, 1, 2.2))
+		_bul_mm.set_instance_transform(i, Transform3D(basis, b.p - dir * 1.1))
 		_bul_mm.set_instance_color(i, Color(1.0, 0.92, 0.6))
 
 
@@ -851,10 +868,9 @@ func _update_nades(dt: float) -> void:
 func _explode(n: Dictionary) -> void:
 	n.node.visible = false
 	var c: Vector3 = n.p
-	var ball := _free_node(_boom_nodes, _booms)
-	ball.visible = true
-	ball.position = c
-	_booms.append({node = ball, t = 0.0})
+	if _booms.size() >= BOOMS:
+		_booms.pop_front()
+	_booms.append({p = c + Vector3(0, 1.0, 0), t = 0.0})
 	shake = maxf(shake, 0.5)
 	sounds.append("boom")
 	Perf.ev("explosion")
@@ -862,7 +878,7 @@ func _explode(n: Dictionary) -> void:
 		_add_part(c, Vector3(randf_range(-1, 1), randf_range(0.3, 1.2), randf_range(-1, 1)).normalized() * randf_range(4, 10), randf_range(0.3, 0.7), [Color("#ffd25a"), Color("#ff8a2a"), Color("#ff5a1a")][i % 3], randf_range(0.08, 0.16))
 	for i in 12:
 		_add_part(c + Vector3(randf_range(-0.8, 0.8), 0.3, randf_range(-0.8, 0.8)), Vector3(randf_range(-1, 1), randf_range(1.5, 3), randf_range(-1, 1)), randf_range(0.8, 1.5), Color(0.25, 0.25, 0.25, 0.6), randf_range(0.3, 0.55), true)
-	_decals.append({p = Vector3(c.x, 0.025, c.z), r = 1.6, life = 10.0, burn = true})
+	_decals.append({p = Vector3(c.x, 0.025, c.z), r = 1.8, life = 10.0, burn = true, seed = randf()})
 	var R: float = Config.GRENADE.radius * PX
 	var g := Vector2(c.x, c.z)
 	for z in zs:
@@ -967,26 +983,42 @@ func _update_fx(dt: float) -> void:
 	_decals.resize(j)
 	while _decals.size() > 80:
 		_decals.pop_front()
-	_decal_mm.visible_instance_count = _decals.size()
 	for i in _decals.size():
 		var d: Dictionary = _decals[i]
-		_decal_mm.set_instance_transform(i, Transform3D(Basis.IDENTITY.scaled(Vector3(d.r, 1, d.r * 0.8)), d.p))
-		var a := minf(0.6, d.life * 0.15)
-		_decal_mm.set_instance_color(i, Color(0.08, 0.05, 0.04, a) if d.get("burn", false) else Color(0.35, 0.03, 0.03, a))
+		var sd: float = d.seed
+		var r: float = d.r
+		var o := i * 20
+		var cs := cos(sd * TAU) * r
+		var sn := sin(sd * TAU) * r
+		var q: Vector3 = d.p
+		# تدوير حول Y + حجم: صفوف المصفوفة 3×4
+		_dbuf[o] = cs
+		_dbuf[o + 2] = sn
+		_dbuf[o + 3] = q.x
+		_dbuf[o + 5] = 1.0
+		_dbuf[o + 7] = q.y
+		_dbuf[o + 8] = -sn
+		_dbuf[o + 10] = cs
+		_dbuf[o + 11] = q.z
+		var burn: bool = d.get("burn", false)
+		_dbuf[o + 12] = 0.06 if burn else 0.4
+		_dbuf[o + 13] = 0.045 if burn else 0.02
+		_dbuf[o + 14] = 0.04 if burn else 0.02
+		_dbuf[o + 15] = minf(0.85, d.life * 0.2)
+		_dbuf[o + 16] = sd
+	_decal_mm.buffer = _dbuf
+	_decal_mm.visible_instance_count = _decals.size()
 	# انفجارات
-	for b in _booms:
-		b.t += dt
-		var k: float = b.t / 0.5
-		b.node.scale = Vector3.ONE * (0.6 + k * 3.2)
-		b.node.transparency = k
 	j = 0
 	for b in _booms:
-		if b.t >= 0.5:
-			b.node.visible = false
-		else:
+		b.t += dt
+		if b.t < 0.75:
 			_booms[j] = b
+			_boom_mm.set_instance_transform(j, Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 7.0), b.p))
+			_boom_mm.set_instance_color(j, Color(1, 1, 1, b.t / 0.75))
 			j += 1
 	_booms.resize(j)
+	_boom_mm.visible_instance_count = j
 	# الفلوس اللي تطلع
 	for q in _pops:
 		q.life -= dt
@@ -1003,6 +1035,8 @@ func _update_fx(dt: float) -> void:
 	# وميض الطلقة
 	_flash_t -= dt
 	_flash.visible = _flash_t > 0
+	if _flash_light != null:
+		_flash_light.visible = _flash.visible and Perf.level() == 2
 	shake = maxf(0, shake - dt)
 
 
