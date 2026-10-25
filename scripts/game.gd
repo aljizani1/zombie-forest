@@ -848,8 +848,8 @@ func witch_ai(z: Zombie, dt: float) -> void:
 
 # تفاحة بقوس نحو المكان اللي راح يكون بيه اللاعب
 func throw_apple(z: Zombie, t: Player) -> void:
-	var hx := z.x + z.w / 2 + z.face * 42
-	var hy := z.y + z.h - 95
+	var hx := z.x + z.w / 2 + z.face * 70
+	var hy := z.y + z.h - 105
 	var tx := t.x + PW / 2 + t.vx * 0.5
 	var ty := t.y + PH * 0.4
 	var T := 0.9

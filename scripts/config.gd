@@ -30,10 +30,10 @@ const ZOMBIES := {
 	"brute": {hp = 60.0, speed = [50.0, 65.0], damage = 25, coins = 40, jumpy = 0.0, scale = 1.4, head = 0.22},
 	"monster": {hp = 110.0, speed = [60.0, 80.0], damage = 32, coins = 90, jumpy = 0.3, scale = 1.0, size = [86.0, 160.0], head = 0.3},
 	# الساحرة: تطلع بآخر الجولة بعد ما يخلصون الزومبي (طايرة على مكنسة، ترمي تفاح مسموم)
-	"witch": {hp = 80.0, speed = [120.0, 130.0], damage = 18, coins = 150, jumpy = 0.0, scale = 1.0, size = [80.0, 150.0], head = 0.3},
+	"witch": {hp = 55.0, speed = [120.0, 130.0], damage = 18, coins = 150, jumpy = 0.0, scale = 1.0, size = [96.0, 190.0], head = 0.3},
 }
 
-const WITCH := {delay = 1.5, apple_damage = 14, apple_every = [1.6, 2.4], hover = 175.0}
+const WITCH := {delay = 1.5, apple_damage = 14, apple_every = [1.6, 2.4], hover = 105.0}
 const HEADSHOT := 3.0 # ضرر الهيدشوت × 3
 const HP_PER_STAGE := 0.07 # الزومبي يصير أقوى 7% كل مرحلة
 const CLEAR_BONUS := 25 # مكافأة إنهاء المرحلة × رقمها

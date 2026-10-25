@@ -307,7 +307,7 @@ func _draw_zombie(z: Game.Zombie, _t: float) -> void:
 
 # ── الساحرة: راكبة مكنسة، عباية سودا بغطا راس، شعر أبيض، عيون خضرا تلمع، وتفاحة حمرا بإيدها ──
 const W_CLOAK := Color("#1f1a26")
-const W_SKIN := Color("#ddd0b8")
+const W_SKIN := Color("#e6cbbb")
 
 
 func _draw_witch(z: Game.Zombie) -> void:
@@ -315,16 +315,16 @@ func _draw_witch(z: Game.Zombie) -> void:
 	var feet := z.y + z.h
 	var t := game.time
 	if z.dead == 0:
-		_shadow(cx, feet, 46)
+		_shadow(cx, feet, 50)
 	g.save()
 	g.translate(cx, feet)
-	g.scale(z.face, 1)
+	g.scale(z.face * 1.2, 1.2)
 	if z.dead > 0:
 		_fall(z.dead)
 	g.flash = 0.7 if z.hurt > 0 else 0.0
 	g.flash_to = Color.WHITE
-	g.translate(0, -15 + sin(t * 3.1) * 5)
-	g.rotate(clampf(z.vx * z.face / 1500.0, -0.15, 0.15))
+	g.translate(0, -10 + sin(t * 3.1) * 5)
+	g.rotate(clampf(z.vx * z.face / 1500.0, -0.12, 0.12))
 	# المكنسة
 	var br := PackedVector2Array([Vector2(-58, -14), Vector2(-100, -28 + sin(t * 9) * 3), Vector2(-110, -8), Vector2(-100, 12 + sin(t * 7) * 3), Vector2(-58, -2)])
 	g.shade(br, Color("#c9a24a"))
@@ -332,53 +332,64 @@ func _draw_witch(z: Game.Zombie) -> void:
 		g.line(Vector2(-60, -12 + i * 2.5), Vector2(-104, -26 + i * 9), Color("#8a6a2a"), 1.2)
 	g.limb(Vector2(-62, -8), Vector2(60, -14), 7, 6, Color("#7a5230"))
 	g.fill(Painter.rect_pts(-62, -15, 8, 13, 2), Color("#4a2e18"))
-	# العباية: من الكتف للمكنسة وتطير لورا بحواف ممزقة
-	var cloak := PackedVector2Array([Vector2(4, -92), Vector2(18, -60), Vector2(26, -14), Vector2(10, -4)])
+	# العباية السودا: من الكتف للمكنسة وتطير لورا بحواف ممزقة
+	var cloak := PackedVector2Array([Vector2(-16, -96), Vector2(26, -96), Vector2(32, -50), Vector2(30, -12), Vector2(12, -4)])
 	for i in 6:
 		var k := i / 5.0
-		cloak.append(Vector2(6 - k * 76, -2 + sin(t * 6 + i * 1.3) * 5 + k * 8 + (10.0 if i % 2 == 0 else 0.0)))
-	cloak.append(Vector2(-60, -42 + sin(t * 5) * 6))
-	cloak.append(Vector2(-36, -80))
-	cloak.append(Vector2(-14, -98))
+		cloak.append(Vector2(8 - k * 78, -2 + sin(t * 6 + i * 1.3) * 5 + k * 8 + (10.0 if i % 2 == 0 else 0.0)))
+	cloak.append(Vector2(-62, -44 + sin(t * 5) * 6))
+	cloak.append(Vector2(-38, -82))
 	g.shade(cloak, W_CLOAK)
-	# رجل وچزمة گدام تحت العباية
-	g.limb(Vector2(12, -16), Vector2(36, -4), 9, 7, Color("#2a2430"))
-	g.shade(Painter.ellipse_pts(Vector2(40, -4), 9, 5, -0.3, 10), Color("#3a2a1a"))
+	# رجل وچزمة گدام
+	g.limb(Vector2(14, -16), Vector2(38, -4), 9, 7, Color("#2a2430"))
+	g.shade(Painter.ellipse_pts(Vector2(42, -4), 9, 5, -0.3, 10), Color("#3a2a1a"))
 	# الإيد الورا ماسكة المكنسة
-	g.limb(Vector2(-6, -74), Vector2(20, -22), 8, 7, Painter.light(W_CLOAK, 0.1))
-	g.blob(Vector2(22, -18), 5, W_SKIN)
-	# غطا الراس
-	g.shade(Painter.ellipse_pts(Vector2(4, -112), 26, 30, 0, 16), W_CLOAK)
-	# شعر أبيض نازل
-	for i in 6:
-		var hx := -4 + i * 4.0
-		var pts := PackedVector2Array([Vector2(hx, -110)])
-		Painter.quad(pts, Vector2(hx - 6 + sin(t * 2 + i) * 3, -92), Vector2(hx - 4 + sin(t * 2.6 + i) * 4, -72 - (i % 3) * 5), 4)
-		g.polyline(pts, Color("#ebe5d2"), 2.2)
-	# الوجه جانبي: خشم معكوف وحنك طالع
-	var face := PackedVector2Array([Vector2(4, -128), Vector2(16, -131), Vector2(23, -124), Vector2(37, -113), Vector2(27, -110), Vector2(24, -104), Vector2(29, -97), Vector2(18, -92), Vector2(8, -96), Vector2(2, -108)])
-	g.shade(face, W_SKIN)
-	g.circle(Vector2(31, -112), 1.8, Color("#a8a070"))
-	# العين: توهج أخضر + حاجب غامق نازل
-	g.glow(Vector2(17, -120), 10, Color(0.55, 1, 0.3, 0.55), Color(0.4, 1, 0.2, 0), 14)
-	g.fill(Painter.ellipse_pts(Vector2(17, -120), 4.4, 3.3, 0, 10), Color("#f4f1e0"))
-	g.circle(Vector2(18.6, -120), 2.1, Color("#7dff3a"))
-	g.circle(Vector2(19, -120), 0.9, Color.BLACK)
-	g.line(Vector2(10, -127), Vector2(24, -122.5), Color("#1a1414"), 2.8)
-	# ضحكة بسن وحدة
-	g.polyline(PackedVector2Array([Vector2(13, -103), Vector2(20, -100.5), Vector2(26, -104)]), Color("#5a1010"), 2.2)
-	g.fill(Painter.rect_pts(18, -102, 2.4, 3.2), Color("#f0ead0"))
-	g.polyline(PackedVector2Array([Vector2(-4, -138), Vector2(10, -141), Vector2(24, -133)]), Painter.light(W_CLOAK, 0.25), 3)
+	g.limb(Vector2(-8, -76), Vector2(20, -22), 9, 8, Painter.light(W_CLOAK, 0.1))
+	g.blob(Vector2(22, -18), 5.5, W_SKIN)
+	# غطا الراس (كبير) والوجه بالنص مواجه للشاشة
+	g.shade(Painter.ellipse_pts(Vector2(6, -122), 33, 37, 0, 18), W_CLOAK)
+	# شعر أبيض طويل نازل من الجهتين فوگ العباية
+	for side: float in [-1.0, 1.0]:
+		var bx: float = 6 + side * 20.0
+		for i in 4:
+			var hx: float = bx + side * i * 3.0
+			var pts := PackedVector2Array([Vector2(hx, -124)])
+			Painter.quad(pts, Vector2(hx + side * (5 + sin(t * 2 + i) * 2), -100), Vector2(hx + side * (3 + sin(t * 2.6 + i) * 3), -70 - (i % 2) * 8), 5)
+			g.polyline(pts, Color("#f1ebd8"), 3.0)
+	var face := Painter.ellipse_pts(Vector2(8, -116), 18, 23, 0, 16)
+	g.shade(face, W_SKIN, true, 0.18)
+	# تجاعيد
+	g.polyline(PackedVector2Array([Vector2(-6, -108), Vector2(-2, -104), Vector2(-4, -99)]), Painter.dark(W_SKIN, 0.25), 1.4)
+	g.polyline(PackedVector2Array([Vector2(22, -108), Vector2(19, -103), Vector2(21, -98)]), Painter.dark(W_SKIN, 0.25), 1.4)
+	g.line(Vector2(0, -133), Vector2(14, -133), Painter.dark(W_SKIN, 0.2), 1.2)
+	# عيون خضرا تلمع + حواجب غامقة زعلانة
+	for ex: float in [1.0, 15.0]:
+		g.glow(Vector2(ex, -121), 8, Color(0.55, 1, 0.3, 0.45), Color(0.4, 1, 0.2, 0), 12)
+		g.fill(Painter.ellipse_pts(Vector2(ex, -121), 4.8, 3.6, 0, 10), Color("#f6f3e6"))
+		g.circle(Vector2(ex + 1.2, -121), 2.3, Color("#8fe53a"))
+		g.circle(Vector2(ex + 1.4, -121), 1.0, Color.BLACK)
+	g.line(Vector2(-6, -129), Vector2(6, -125), Color("#1a1414"), 3.4)
+	g.line(Vector2(22, -129), Vector2(10, -125), Color("#1a1414"), 3.4)
+	# خشم كبير معكوف لتحت
+	var nose := PackedVector2Array([Vector2(7, -122), Vector2(12, -121), Vector2(20, -108), Vector2(24, -101), Vector2(17, -102), Vector2(8, -106)])
+	g.shade(nose, Painter.dark(W_SKIN, 0.05))
+	g.circle(Vector2(19, -109), 1.8, Color("#a8a070"))
+	# حلگ عابس بسن وحدة
+	g.polyline(PackedVector2Array([Vector2(-3, -96), Vector2(4, -99), Vector2(12, -98), Vector2(17, -95)]), Color("#7a1414"), 2.6)
+	g.fill(Painter.rect_pts(9, -98.5, 2.6, 3.6), Color("#f0ead0"))
+	# حافة الغطا فوگ الجبهة
+	g.polyline(PackedVector2Array([Vector2(-14, -136), Vector2(8, -143), Vector2(30, -136)]), Painter.light(W_CLOAK, 0.25), 3)
 	# الإيد الگدامية: ترتفع وقت الرمي، والتفاحة بيها لحد ما ترميها
 	var up := 0.0 if z.atk_t <= 0 else sin((1 - z.atk_t / 0.35) * PI)
-	var hand := Vector2(44, -70 - up * 30)
-	g.limb(Vector2(8, -86), hand, 9, 7, Painter.light(W_CLOAK, 0.08))
-	g.blob(hand + Vector2(3, 0), 5.5, W_SKIN)
-	for i in 3:
-		g.line(hand + Vector2(4, -2 + i * 2.5), hand + Vector2(11, -4 + i * 3.5), Painter.dark(W_SKIN, 0.15), 1.6)
+	var hand := Vector2(48, -70 - up * 30)
+	g.limb(Vector2(16, -88), hand, 10, 8, Painter.light(W_CLOAK, 0.08))
+	g.blob(hand + Vector2(3, 0), 6, W_SKIN)
+	for i in 4:
+		g.line(hand + Vector2(4, -3 + i * 2.2), hand + Vector2(12, -6 + i * 3.4), Painter.dark(W_SKIN, 0.15), 1.6)
 	if z.atk_t <= 0 and z.dead == 0:
-		_apple(hand + Vector2(9, -7), 8)
+		_apple(hand + Vector2(10, -9), 10)
 	g.flash = 0.0
+	g.alpha = 1.0
 	g.restore()
 
 
