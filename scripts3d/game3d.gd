@@ -108,6 +108,7 @@ var _nades := [] # {p: Vector3, v: Vector3, t, node, owner}
 var _booms := [] # {node, t}
 var _pops := [] # {node, life}
 var _flash: MeshInstance3D
+var _blob_mm: MultiMesh # ظلال دائرية ناعمة تحت الزومبي (رسمة وحدة)
 var _flash_t := 0.0
 var _shots := 0 # للقياس بس (أول طلقة)
 
@@ -143,6 +144,9 @@ func _ready() -> void:
 	disc.height = 0.01
 	disc.radial_segments = 14
 	_decal_mm = _mm(disc, 80, true)
+	var blob := PlaneMesh.new()
+	blob.size = Vector2(1, 1)
+	_blob_mm = _mm(blob, 64, true, _blob_shader())
 	_flash = MeshInstance3D.new()
 	_flash.mesh = H.mesh("sphere", 0.16)
 	_flash.material_override = H.mat(Color("#ffe9a0"), 0.2, 6.0)
@@ -156,11 +160,30 @@ func _glow_box() -> Mesh:
 	return b
 
 
-func _mm(mesh: Mesh, n: int, colors: bool) -> MultiMesh:
-	var m := StandardMaterial3D.new()
-	m.vertex_color_use_as_albedo = true
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+func _blob_shader() -> ShaderMaterial:
+	var sh := Shader.new()
+	sh.code = """
+shader_type spatial;
+render_mode unshaded, depth_draw_never, cull_disabled;
+void fragment() {
+	float d = length(UV - 0.5) * 2.0;
+	ALBEDO = vec3(0.0);
+	ALPHA = (1.0 - smoothstep(0.25, 1.0, d)) * COLOR.a;
+}
+"""
+	var m := ShaderMaterial.new()
+	m.shader = sh
+	return m
+
+
+func _mm(mesh: Mesh, n: int, colors: bool, mat_: Material = null) -> MultiMesh:
+	var m: Material = mat_
+	if m == null:
+		var sm := StandardMaterial3D.new()
+		sm.vertex_color_use_as_albedo = true
+		sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m = sm
 	mesh = mesh.duplicate()
 	mesh.surface_set_material(0, m)
 	var mm := MultiMesh.new()
@@ -446,6 +469,19 @@ func _update_zombies(dt: float) -> void:
 		var state := "fly" if z.fly > 0 else ("attack" if z.atk_t > 0 else "walk")
 		n.animate(dt, z.vel.length(), state, 1.0 - z.atk_t / 0.35)
 		n.set_flash(z.hurt > 0)
+	# الظلال الدائرية (الطاير ظله أصغر وأخف)
+	var nb := 0
+	for z in zs:
+		if nb >= 64:
+			break
+		var a: float = 0.55 if z.fly == 0 else 0.3
+		if z.dead > 0:
+			a *= clampf(2.0 - z.dead, 0, 1)
+		var r: float = z.r * (2.6 if z.fly == 0 else 1.8)
+		_blob_mm.set_instance_transform(nb, Transform3D(Basis.IDENTITY.scaled(Vector3(r, 1, r)), Vector3(z.node.position.x, 0.04, z.node.position.z)))
+		_blob_mm.set_instance_color(nb, Color(0, 0, 0, a))
+		nb += 1
+	_blob_mm.visible_instance_count = nb
 	for z in zs:
 		if z.dead > 2.0:
 			z.node.queue_free()

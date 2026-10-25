@@ -30,6 +30,7 @@ var _parts: Array = [] # [MeshInstance3D، مادته]
 var _phase := 0.0
 var _t := 0.0
 var _flash := false
+var _shadow := GeometryInstance3D.SHADOW_CASTING_SETTING_ON # الزومبي بدون ظل حقيقي (ظل دائري تحتهم من اللعبة)
 
 
 static func mesh(kind_: String, a: float, b := 0.0, c := 0.0) -> Mesh:
@@ -89,6 +90,7 @@ func _part(parent: Node3D, m: Mesh, col: Color, pos := Vector3.ZERO, rot := Vect
 	mi.material_override = mt
 	mi.position = pos
 	mi.rotation = rot
+	mi.cast_shadow = _shadow
 	parent.add_child(mi)
 	_parts.append([mi, mt])
 	return mi
@@ -109,6 +111,8 @@ func build(k: String, look: Dictionary) -> void:
 	var skin: Color = look.get("skin", SKIN)
 	var boots := Color("#2b2520")
 	var zombie := kind != "soldier"
+	if zombie:
+		_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var wide := 1.3 if kind == "brute" or kind == "monster" else 1.0
 
 	hips = _pivot(self, Vector3(0, 0.92, 0))
@@ -133,6 +137,7 @@ func build(k: String, look: Dictionary) -> void:
 			e.mesh = mesh("sphere", 0.025)
 			e.material_override = mat(eye, 0.3, 3.0)
 			e.position = Vector3(s, 0.13, -0.125)
+			e.cast_shadow = _shadow
 			head.add_child(e)
 		_part(head, mesh("box", 0.12, 0.04, 0.03), Color("#2b0d0d"), Vector3(0, 0.03, -0.13))
 	else:
