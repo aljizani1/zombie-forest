@@ -1,5 +1,5 @@
-# كل ما ترفع تعديل على main: GitHub يبني ملف APK ونسخة المتصفح، يحط الـ APK بـ Releases، ويحدّث صفحة التحميل واللعب.
-name: Build APK + Web
+# كل ما ترفع تعديل على main: GitHub يبني نسخة المتصفح ويحدّث صفحة اللعب (بدون APK).
+name: Build Web
 
 on:
   push:
@@ -15,15 +15,10 @@ env:
   GODOT_VERSION: 4.7.2
 
 jobs:
-  apk:
+  web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
 
       - name: Download Godot + export templates
         run: |
@@ -44,28 +39,15 @@ jobs:
           export/android/java_sdk_path = "${JAVA_HOME}"
           EOF
 
-      - name: Signing key
-        run: echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > $RUNNER_TEMP/release.keystore
-
       # رقم النسخة يطلع بالقائمة (حتى تعرف إذا التحديث وصلك)
       - name: Version
         run: echo "${GITHUB_SHA::8}" > version.txt
-
-      - name: Export APK
-        env:
-          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ runner.temp }}/release.keystore
-          GODOT_ANDROID_KEYSTORE_RELEASE_USER: zombie
-          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: ${{ secrets.KEYSTORE_PASS }}
-        run: |
-          mkdir -p build
-          ./godot --headless --import || true
-          ./godot --headless --export-release "Android" build/zombie-forest.apk
-          ls -la build/zombie-forest.apk
 
       # نسخة المتصفح: تنحط بصفحة التحميل تحت /play/
       - name: Export Web
         run: |
           mkdir -p build/web
+          ./godot --headless --import || true
           ./godot --headless --export-release "Web" build/web/index.html
           mkdir -p web/play
           cp -r build/web/* web/play/
@@ -84,20 +66,12 @@ jobs:
           grep -o '"mainPack":"[^"]*"' web/play/index.html
           ls -la web/play
 
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: زومبي الغابة ${{ github.run_number }}
-          files: build/zombie-forest.apk
-          make_latest: true
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web
 
   pages:
-    needs: apk
+    needs: web
     runs-on: ubuntu-latest
     environment:
       name: github-pages
