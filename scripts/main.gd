@@ -68,6 +68,7 @@ var _ended := false
 var _touch_t := 0.0
 var _shot := ""
 var _shot_t := 0.0
+var _bench := {} # --bench: قياس أداء ثابت (20 زومبي)
 
 
 func _ready() -> void:
@@ -98,6 +99,15 @@ func _ready() -> void:
 
 	# للفحص: يلعب لوحده شوية ويحفظ صورة الشاشة ويطلع (بدون حساب)
 	var args := OS.get_cmdline_user_args()
+	if args.has("--bench"):
+		_bench = {t = 0.0, frames = [], shot = "user://bench.png"}
+		var i := args.find("--bench")
+		if args.size() > i + 1 and not args[i + 1].begins_with("--"):
+			_bench.shot = args[i + 1]
+		level = float(args[args.find("--level") + 1]) if args.has("--level") else 15.0
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+		_start()
+		return
 	if args.has("--shot"):
 		_shot = args[args.find("--shot") + 1] if args.size() > args.find("--shot") + 1 else "user://shot.png"
 		if args.has("--level"):
@@ -715,6 +725,8 @@ func _process(delta: float) -> void:
 		inp.move = 0.4 if fmod(game.time, 4.0) < 2.0 else -0.4
 		inp.fire = true
 		inp.aim = 0.0 if inp.move > 0 else PI
+	elif not _bench.is_empty():
+		_bench_play(delta)
 	elif _shot != "":
 		_auto_play(delta)
 	elif not _use_touch:
@@ -938,6 +950,62 @@ func _auto_play(delta: float) -> void:
 		print("fps=", Engine.get_frames_per_second(), " zombies=", game.zs.size(), " kills=", game.my_kills, " hp=", game.me().hp)
 		get_viewport().get_texture().get_image().save_png(_shot)
 		get_tree().quit()
+
+
+# بنچ: 14 ثانية بدون رمي (الزومبي يتجمعون لـ ~20) وبعدها 20 ثانية رمي + رمانات. اللاعب ما يموت.
+func _bench_play(delta: float) -> void:
+	var b := _bench
+	b.t += delta
+	var me := game.me()
+	me.hp = me.max_hp
+	inp.move_v = Vector2.from_angle(b.t * 0.5) * 0.5
+	var near = null
+	var alive := 0
+	for z in game.zs:
+		if z.dead == 0:
+			alive += 1
+			if near == null or z.pos.distance_to(me.pos) < near.pos.distance_to(me.pos):
+				near = z
+	var firing: bool = b.t > 14.0
+	inp.fire = firing and near != null
+	inp.aim = (near.pos - me.pos).angle() if near != null else null
+	if firing and fmod(b.t, 2.5) < delta:
+		inp.throw = true
+	if b.t > 1.0:
+		b.frames.append([delta * 1000.0, Perf.draw_calls(), alive, Perf.nodes(), firing])
+	if b.t > 13.0 and not b.has("pic"):
+		b.pic = get_viewport().get_texture().get_image() # تنحفظ بالآخر (الحفظ نفسه يعمل spike)
+	if b.t < 34.0:
+		return
+	b.pic.save_png(b.shot)
+	var n := 0
+	var ms := 0.0
+	var dc := 0.0
+	var dc_max := 0
+	var over25 := 0
+	var over33 := 0
+	var worst := 0.0
+	for f in b.frames:
+		worst = maxf(worst, f[0])
+		over25 += 1 if f[0] > 25 else 0
+		over33 += 1 if f[0] > 33 else 0
+		if f[2] >= 18:
+			n += 1
+			ms += f[0]
+			dc += f[1]
+			dc_max = maxi(dc_max, f[1])
+	var peak := 0
+	for f in b.frames:
+		peak = maxi(peak, f[2])
+	print("BENCH %s level=%.0f peak_alive=%d frames=%d" % [RenderingServer.get_current_rendering_method(), level, peak, b.frames.size()])
+	if n > 0:
+		print("BENCH with>=18 zombies: avg %.2f ms (%.0f fps)  draw calls avg %.0f max %d  nodes %d" % [ms / n, 1000.0 / (ms / n), dc / n, dc_max, Perf.nodes()])
+	print("BENCH worst frame %.1f ms  frames>25ms: %d  frames>33ms: %d" % [worst, over25, over33])
+	var sp: Array = Perf.spikes.duplicate()
+	sp.sort_custom(func(x, y): return x[0] > y[0])
+	for i in mini(8, sp.size()):
+		print("BENCH spike %.1f ms | %s" % sp[i])
+	get_tree().quit()
 
 
 # جهازين يلعبون LAN لوحدهم ويحفظون صورة

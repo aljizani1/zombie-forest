@@ -109,6 +109,7 @@ var _booms := [] # {node, t}
 var _pops := [] # {node, life}
 var _flash: MeshInstance3D
 var _flash_t := 0.0
+var _shots := 0 # للقياس بس (أول طلقة)
 
 
 func _init(p: Park, level_v: float, owned_list: Array, weapon: String, who := {}) -> void:
@@ -328,6 +329,9 @@ func _fire(p: P) -> void:
 	# ظرف الطلقة
 	_add_part(origin + Vector3(0, -0.05, 0), Vector3(-dir.z, 0, dir.x) * randf_range(1.5, 2.5) + Vector3(0, 3, 0), 0.7, Color("#d9a441"), 0.04)
 	sounds.append(p.weapon)
+	if _shots == 0:
+		Perf.ev("first shot")
+	_shots += 1
 
 
 func _throw(p: P) -> void:
@@ -343,6 +347,7 @@ func _throw(p: P) -> void:
 	_nades.append({p = v3(p.pos, 1.3), v = v3(dir * 11.0, 6.5) + v3(p.vel * 0.4), t = Config.GRENADE.fuse, node = node, owner = p.id})
 	p.recoil = 1
 	sounds.append("throw")
+	Perf.ev("grenade thrown")
 
 
 # ════════ الزومبي ════════
@@ -390,6 +395,7 @@ func _spawn(dt: float) -> void:
 	add_child(z.node)
 	zs.append(z)
 	spawned += 1
+	Perf.ev("spawn " + kind)
 	if kind == "monster":
 		sounds.append("roar")
 
@@ -443,6 +449,7 @@ func _update_zombies(dt: float) -> void:
 	for z in zs:
 		if z.dead > 2.0:
 			z.node.queue_free()
+			Perf.ev("free zombie")
 	zs = zs.filter(func(z): return z.dead <= 2.0)
 
 
@@ -460,6 +467,7 @@ func _hurt(p: P, z: Z) -> void:
 func _kill(z: Z, owner: String) -> void:
 	z.dead = 0.0001
 	killed += 1
+	Perf.ev("died " + z.kind)
 	var c: int = Config.ZOMBIES[z.kind].coins
 	credits[owner] = int(credits.get(owner, 0)) + c
 	if owner == me_id:
@@ -501,6 +509,7 @@ func _update_bullets(dt: float) -> void:
 			_splash(Vector3(hit.x, 1.1 + best.fly, hit.z), 12 if head else 6, [Color("#7a1212"), Color("#5d6b2a"), Color("#ffd27a")])
 			if head:
 				sounds.append("headshot")
+				Perf.ev("headshot")
 				if b.owner == me_id:
 					my_headshots += 1
 					_pop(v3(best.pos, 2.6 + best.fly), "هيدشوت!", Color("#ff5a3a"))
@@ -572,6 +581,7 @@ func _explode(n: Dictionary) -> void:
 	_booms.append({node = ball, t = 0.0})
 	shake = maxf(shake, 0.5)
 	sounds.append("boom")
+	Perf.ev("explosion")
 	for i in 26:
 		_add_part(c, Vector3(randf_range(-1, 1), randf_range(0.3, 1.2), randf_range(-1, 1)).normalized() * randf_range(4, 10), randf_range(0.3, 0.7), [Color("#ffd25a"), Color("#ff8a2a"), Color("#ff5a1a")][i % 3], randf_range(0.08, 0.16))
 	for i in 12:
@@ -617,6 +627,7 @@ func _pop(p: Vector3, text: String, col: Color) -> void:
 	l.no_depth_test = true
 	l.position = p
 	add_child(l)
+	Perf.ev("popup " + text)
 	_pops.append({node = l, life = 1.1})
 
 

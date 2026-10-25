@@ -18,6 +18,7 @@ config/features=PackedStringArray("4.7", "Mobile")
 
 Config="*res://scripts/config.gd"
 Sfx="*res://scripts/sfx.gd"
+Perf="*res://scripts/perf.gd"
 
 [display]
 
