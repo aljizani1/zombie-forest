@@ -16,6 +16,8 @@ var cam: Camera3D
 var sun: DirectionalLight3D
 var env: Environment
 var rng := RandomNumberGenerator.new()
+const GRASS := preload("res://assets/textures/grass.jpg")
+const STONE := preload("res://assets/textures/stone.jpg")
 var _mats := {}
 
 
@@ -115,16 +117,19 @@ shader_type spatial;
 varying vec3 wp;
 """ + NOISE + """
 void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+uniform sampler2D grass : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 void fragment() {
+	// صورة العشب مرتين (حجم ودوران مختلف) ممزوجة بالضجيج حتى ما يبين التكرار، وبقع أفتح وأغمق
+	vec3 t1 = texture(grass, wp.xz / 3.2).rgb;
+	vec3 t2 = texture(grass, mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8)) * wp.xz / 4.6 + 0.37).rgb;
+	vec3 col = mix(t1, t2, smoothstep(0.3, 0.7, noise(wp.xz * 0.21)));
 	float n = noise(wp.xz * 0.12) * 0.6 + noise(wp.xz * 0.7) * 0.4;
-	vec3 a = vec3(0.24, 0.48, 0.16);
-	vec3 b = vec3(0.42, 0.62, 0.22);
-	vec3 col = mix(a, b, n);
-	col *= 0.93 + 0.14 * noise(wp.xz * 2.5);
-	ALBEDO = pow(col, vec3(2.2));
+	col *= mix(vec3(0.62, 0.8, 0.55), vec3(0.92, 0.97, 0.72), n);
+	ALBEDO = col;
 	ROUGHNESS = 0.95;
 }
 """)
+	m.set_shader_parameter("grass", GRASS)
 	var g := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(HALF * 2 + 30, HALF * 2 + 30)
@@ -135,24 +140,23 @@ void fragment() {
 
 # ── ممرات حجر (دائري حول البحيرة + أربع ممرات للأبواب) ──
 func _stone_mat() -> ShaderMaterial:
-	return _shader("""
+	var m := _shader("""
 shader_type spatial;
 render_mode cull_disabled;
 varying vec3 wp;
 """ + NOISE + """
 void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+uniform sampler2D stone : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 void fragment() {
-	vec2 p = (abs(NORMAL.y) > 0.5 ? wp.xz : (abs(NORMAL.x) > 0.5 ? wp.zy : wp.xy)) * 1.6;
-	vec2 cell = floor(p + vec2(0.0, mod(floor(p.x), 2.0) * 0.5));
-	vec2 f = fract(p + vec2(0.0, mod(floor(p.x), 2.0) * 0.5));
-	float edge = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
-	float tone = 0.78 + 0.22 * hash(cell);
-	vec3 stone = vec3(0.74, 0.71, 0.66) * tone + 0.06 * noise(wp.xz * 6.0);
-	vec3 col = mix(vec3(0.28, 0.27, 0.25), stone, smoothstep(0.03, 0.09, edge));
-	ALBEDO = pow(col, vec3(2.2));
+	vec2 p = (abs(NORMAL.y) > 0.5 ? wp.xz : (abs(NORMAL.x) > 0.5 ? wp.zy : wp.xy)) / 4.4;
+	vec3 col = texture(stone, p).rgb;
+	col *= vec3(0.62, 0.6, 0.57) * (0.85 + 0.3 * noise(wp.xz * 0.35 + wp.y));
+	ALBEDO = col;
 	ROUGHNESS = 0.85;
 }
 """)
+	m.set_shader_parameter("stone", STONE)
+	return m
 
 
 func _paths() -> void:

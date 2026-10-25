@@ -9,3 +9,11 @@ characters/soldier.glb  (also provides the Pistol / AK / Sniper_2 weapon meshes)
   https://poly.pizza/m/PpLF4rt4ah  (direct: https://static.poly.pizza/1083c1d3-d1d4-4682-adf6-bc516d06ac84.glb)
 
 fonts/Cairo.ttf - SIL Open Font License (see fonts/OFL.txt)
+
+textures/grass.jpg  (re-encoded 1024x1024 color map)
+  "Grass004" from ambientCG.com - CC0 1.0 (public domain)
+  https://ambientcg.com/view?id=Grass004
+
+textures/stone.jpg  (re-encoded 1024x1024 color map)
+  "PavingStones070" from ambientCG.com - CC0 1.0 (public domain)
+  https://ambientcg.com/view?id=PavingStones070
