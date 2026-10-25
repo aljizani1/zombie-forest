@@ -383,6 +383,17 @@ func _signed_in(r: Dictionary) -> void:
 	_save()
 	_show_menu()
 	_refresh_stats()
+	_load_private_media()
+
+
+# أصوات الساحرة الخاصة: السيرفر ينطيها بس لحسابات معينة عليها رمز (ما موجودة بملفات اللعبة)
+func _load_private_media() -> void:
+	Sfx.clear_custom()
+	var r = await supa.call_fn("witch_media", {p_token = token})
+	if r is Dictionary and r.get("ok", false):
+		var media: Dictionary = r.get("media", {})
+		for k in media:
+			Sfx.set_custom(str(k), str(media[k]))
 
 
 func _refresh_stats() -> void:
@@ -509,6 +520,7 @@ func _show_settings(msg := "") -> void:
 		if has_pin:
 			_button("شيل الرمز", func(): _set_pin(""), r2)
 		_button("تسجيل خروج", func():
+			Sfx.clear_custom()
 			token = ""
 			online = false
 			is_admin = false

@@ -11,6 +11,9 @@ var _next := 0
 var _last := {} # آخر وقت اشتغل بيه كل صوت (حتى ما تتكدس نفس الأصوات بنفس اللحظة)
 var enabled := true
 var _music: AudioStreamPlayer # موسيقى الساحرة (تلف لحد ما تموت)
+var _music_own: AudioStream # الموسيقى اللي صنعناها
+# أصوات خاصة تجي من السيرفر لحسابات معينة بس (ما موجودة بملفات اللعبة): الاسم ← صوت
+var custom := {}
 
 # الصوت ← [عدد النسخ، القوة بالديسيبل، أقل وقت بين مرتين]
 const SOUNDS := {
@@ -38,6 +41,39 @@ func _ready() -> void:
 	_build_music()
 
 
+# صوت خاص (ogg بصيغة base64 من السيرفر). "music" يصير موسيقى الساحرة
+func set_custom(name: String, b64: String) -> void:
+	var st := AudioStreamOggVorbis.load_from_buffer(Marshalls.base64_to_raw(b64))
+	if st == null:
+		return
+	if name == "music":
+		st.loop = true
+		_music.stop()
+		_music.stream = st
+	custom[name] = st
+
+
+func clear_custom() -> void:
+	custom.clear()
+	_music.stop()
+	_music.stream = _music_own
+
+
+# الصوت الخاص طويل: ما يعيد لحد ما يخلص
+func _play_custom(name: String) -> void:
+	var st: AudioStream = custom[name]
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - float(_last.get(name, -100.0)) < st.get_length():
+		return
+	_last[name] = now
+	var p := _players[_next]
+	_next = (_next + 1) % _players.size()
+	p.stream = st
+	p.pitch_scale = 1.0
+	p.volume_db = 0.0
+	p.play()
+
+
 # تشتغل وتوگف حسب وجود الساحرة (اللعبة تناديها كل إطار)
 func music(on: bool) -> void:
 	on = on and enabled and _music.stream != null
@@ -55,6 +91,9 @@ func _fill(name: String) -> void:
 
 func play(name: String) -> void:
 	if not enabled or not SOUNDS.has(name):
+		return
+	if custom.has(name):
+		_play_custom(name)
 		return
 	var cfg: Array = SOUNDS[name]
 	var now := Time.get_ticks_msec() / 1000.0
@@ -169,7 +208,9 @@ func _build_music() -> void:
 	var w := _wav(s)
 	w.loop_mode = AudioStreamWAV.LOOP_FORWARD
 	w.loop_end = n
-	_music.stream = w
+	_music_own = w
+	if not custom.has("music"):
+		_music.stream = w
 
 
 # نغمة منتوفة (مثل الهارپسيكورد): أساس + توافقيات وتخفت
