@@ -955,6 +955,10 @@ func _auto_play(delta: float) -> void:
 # بنچ: 14 ثانية بدون رمي (الزومبي يتجمعون لـ ~20) وبعدها 20 ثانية رمي + رمانات. اللاعب ما يموت.
 func _bench_play(delta: float) -> void:
 	var b := _bench
+	if not game.loaded:
+		return
+	if b.t == 0.0:
+		Perf.spikes.clear() # اللي صار وقت التحميل ما ينحسب
 	b.t += delta
 	var me := game.me()
 	me.hp = me.max_hp

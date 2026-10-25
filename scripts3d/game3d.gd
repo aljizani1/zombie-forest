@@ -117,6 +117,9 @@ var _pop_nodes: Array[Label3D] = []
 var _nade_nodes: Array[MeshInstance3D] = []
 var _boom_nodes: Array[MeshInstance3D] = []
 var _boom_mat: StandardMaterial3D
+var loaded := false # شاشة التحميل خلصت (المجموعات انبنت والمواد تجهزت)
+var _load_ui: CanvasLayer
+var _load_bar: ProgressBar
 const FONT := preload("res://fonts/cairo_bold.tres")
 var _blob_mm: MultiMesh # ظلال دائرية ناعمة تحت الزومبي (رسمة وحدة)
 var _flash_t := 0.0
@@ -157,22 +160,134 @@ func _ready() -> void:
 	var blob := PlaneMesh.new()
 	blob.size = Vector2(1, 1)
 	_blob_mm = _mm(blob, 64, true, _blob_shader())
-	_make_pools()
 	_flash = MeshInstance3D.new()
 	_flash.mesh = H.mesh("sphere", 0.16)
 	_flash.material_override = H.mat(Color("#ffe9a0"), 0.2, 6.0)
 	_flash.visible = false
 	add_child(_flash)
+	_loading()
+
+
+# ════════ شاشة التحميل ════════
+# نبني الزومبي شوية شوية ويا شريط تقدّم، وبعدين نرسم كل شي مرة وحدة گدام الكاميرا (3 إطارات)
+# حتى الكارت يجهّز كل المواد هسه، مو بنص القتال (أول طلقة، أول هيدشوت، أول رمانة...).
+func _loading() -> void:
+	_show_loading()
+	_make_pools()
+	var kinds := []
+	for kind in cfg.mix:
+		if cfg.mix[kind] > 0:
+			kinds.append(kind)
+	var n_total: int = maxi(1, kinds.size() * (cfg.max_alive + 5))
+	var built := 0
+	for kind in kinds:
+		_zpool[kind] = []
+		for i in cfg.max_alive + 5:
+			_zpool[kind].append(_new_zombie(kind))
+			built += 1
+			if built % 8 == 0:
+				_load_bar.value = 0.85 * built / n_total
+				await get_tree().process_frame
+				if not is_inside_tree():
+					return
+	await _warm_up()
+	if not is_inside_tree():
+		return
+	loaded = true
+	_load_ui.queue_free()
+	Perf.ev("loaded")
+
+
+func _show_loading() -> void:
+	_load_ui = CanvasLayer.new()
+	_load_ui.layer = 10
+	add_child(_load_ui)
+	var bg := ColorRect.new()
+	bg.color = Color(0.04, 0.06, 0.05)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_load_ui.add_child(bg)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_load_ui.add_child(center)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 18)
+	center.add_child(box)
+	var l := Label.new()
+	l.text = "دا يحمّل..."
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", 34)
+	l.add_theme_color_override("font_color", Color("#ffd23f"))
+	box.add_child(l)
+	_load_bar = ProgressBar.new()
+	_load_bar.custom_minimum_size = Vector2(420, 22)
+	_load_bar.max_value = 1.0
+	_load_bar.show_percentage = false
+	var bg_sb := StyleBoxFlat.new()
+	bg_sb.bg_color = Color(1, 1, 1, 0.12)
+	bg_sb.set_corner_radius_all(11)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color("#7bd64a")
+	fill.set_corner_radius_all(11)
+	_load_bar.add_theme_stylebox_override("background", bg_sb)
+	_load_bar.add_theme_stylebox_override("fill", fill)
+	box.add_child(_load_bar)
+
+
+func _warm_up() -> void:
+	_camera(1.0)
+	var c := v3(me().pos + Vector2.from_angle(me().aim) * 1.5)
+	var shown: Array = []
+	var i := 0
+	for kind in _zpool:
+		if _zpool[kind].is_empty():
+			continue
+		var n: Humanoid = _zpool[kind][0]
+		n.reset()
+		n.position = c + Vector3(-3.0 + i * 1.3, 2.2 if kind == "flyer" else 0.0, -1.5)
+		n.animate(0.016, 1.0, "fly" if kind == "flyer" else "walk")
+		n.set_flash(i == 0)
+		shown.append(n)
+		i += 1
+	me().node.set_flash(true)
+	_flash.position = c + Vector3(0, 1.2, 0)
+	_flash.visible = true
+	var ball := _boom_nodes[0]
+	ball.position = c + Vector3(2, 1, 1)
+	ball.transparency = 0.5
+	ball.visible = true
+	var texts := ["هيدشوت!", "+0123456789"]
+	for k in texts.size():
+		var l := _pop_nodes[k]
+		l.text = texts[k]
+		l.position = c + Vector3(-1 + k * 2.0, 2.5, 0)
+		l.visible = true
+	_nade_nodes[0].position = c + Vector3(1, 0.5, 1)
+	_nade_nodes[0].visible = true
+	for mm in [_part_mm, _bul_mm, _decal_mm, _blob_mm]:
+		mm.visible_instance_count = 1
+		mm.set_instance_transform(0, Transform3D(Basis.IDENTITY, c + Vector3(0, 0.5, 1)))
+		mm.set_instance_color(0, Color(1, 1, 1, 0.5))
+	for k in 3:
+		_load_bar.value = 0.85 + 0.05 * (k + 1)
+		await get_tree().process_frame
+		if not is_inside_tree():
+			return
+	for n in shown:
+		n.set_flash(false)
+		n.visible = false
+	me().node.set_flash(false)
+	_flash.visible = false
+	ball.visible = false
+	ball.transparency = 0.0
+	for l in _pop_nodes:
+		l.visible = false
+	_nade_nodes[0].visible = false
+	for mm in [_part_mm, _bul_mm, _decal_mm, _blob_mm]:
+		mm.visible_instance_count = 0
+	_load_bar.value = 1.0
 
 
 func _make_pools() -> void:
-	for kind in cfg.mix:
-		if cfg.mix[kind] <= 0:
-			continue
-		var list: Array = []
-		for i in cfg.max_alive + 5:
-			list.append(_new_zombie(kind))
-		_zpool[kind] = list
 	for i in POPS:
 		var l := Label3D.new()
 		l.font = FONT
@@ -334,6 +449,8 @@ func aim_at_screen(sp: Vector2):
 
 # ════════ خطوة ════════
 func step(inp: Inp, dt: float) -> void:
+	if not loaded:
+		return
 	time += dt
 	if status != "play":
 		end_t += dt
