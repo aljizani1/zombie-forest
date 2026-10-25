@@ -28,6 +28,7 @@ func _ready() -> void:
 	_walls()
 	_props()
 	_trees()
+	_merge_static()
 	cam = Camera3D.new()
 	cam.fov = 42
 	cam.far = 200
@@ -467,6 +468,36 @@ func _multi(mesh: Mesh, list: Array) -> void:
 	var mi := MultiMeshInstance3D.new()
 	mi.multimesh = mm
 	add_child(mi)
+
+
+# كل القطع الثابتة (مصاطب، طاولات، جسر، أعمدة، سور...) تندمج برسمة وحدة لكل مادة:
+# بدال ~110 رسمة (وضعفها للظلال) تصير ~10
+func _merge_static() -> void:
+	var groups := {} # المادة ← [MeshInstance3D]
+	for mi: MeshInstance3D in find_children("*", "MeshInstance3D", true, false):
+		if not (mi.material_override is StandardMaterial3D) or mi.mesh.get_surface_count() != 1:
+			continue
+		var key: Material = mi.material_override
+		if not groups.has(key):
+			groups[key] = []
+		groups[key].append(mi)
+	for m: Material in groups:
+		var list: Array = groups[m]
+		if list.size() < 2:
+			continue
+		var st := SurfaceTool.new()
+		for mi: MeshInstance3D in list:
+			st.append_from(mi.mesh, 0, global_transform.affine_inverse() * mi.global_transform)
+		var merged := MeshInstance3D.new()
+		merged.mesh = st.commit()
+		merged.material_override = m
+		add_child(merged)
+		for mi: MeshInstance3D in list:
+			mi.free()
+	# مجموعات فاضية (المصاطب والطاولات كانت Node3D فيها قطع)
+	for c in get_children():
+		if c.get_class() == "Node3D" and c.get_child_count() == 0:
+			c.free()
 
 
 # ── التصادم: نطلّع الدايرة (موقع + نص قطر) من العوائق والسور ──

@@ -1,5 +1,5 @@
 # ════════ شخصية ثلاثية الأبعاد (جندي أو زومبي) ════════
-# موديلات GLB مع عظام وأنيميشن (Quaternius، CC0): الزومبي = رسمتين بس (جسم + جفون) بدال ~30 قطعة.
+# موديلات GLB مع عظام وأنيميشن (Quaternius، CC0): الزومبي = رسمة وحدة بدال ~30 قطعة.
 # الأنيميشن بـ AnimationTree: انتقال ناعم (0.2 ث) بين الوقوف / المشي / الركض / الضربة / الموت،
 # وسرعة الأنيميشن تمشي ويا سرعة الحركة حتى الرجلين ما تزحلق. الانضراب = حركة قصيرة للنص الفوگاني + لمعة بيضة.
 # الوجه لـ -Z (قدّام). نفس الواجهة القديمة: build / animate / set_flash / set_gun / muzzle.
@@ -144,6 +144,9 @@ func build(k: String, look: Dictionary) -> void:
 	var tint: Color = _tint(look) if _zombie else Color.WHITE
 	for m: MeshInstance3D in _model.find_children("*", "MeshInstance3D", true, false):
 		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if _zombie else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		if _zombie and m.name == "Eyelid": # جفون صغيرة ما تبين من فوگ: رسمة زايدة لكل زومبي
+			m.free()
+			continue
 		if _zombie and m.name == "Zombie":
 			m.material_override = _tinted(kind, m.mesh.surface_get_material(0), tint)
 		if not _zombie and m.get_parent().name == "Index1_R":
