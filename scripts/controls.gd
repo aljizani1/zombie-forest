@@ -2,6 +2,7 @@
 # جويستيكين منفصلين:
 #   - اليسار للحركة (يمين/يسار، ولفوگ = قفز، ولتحت = نزول من المنصة)
 #   - اليمين للتصويب والرمي: تأشّر بيه على العدو، السلاح يتوجه لهناك ويرمي
+#     (أو زر ثابت من الإعدادات: يرمي لگدام بس)
 # + زر القفز وزر تبديل السلاح وزر الرمانة.
 extends Control
 
@@ -18,6 +19,7 @@ const LAYOUT := {
 
 var inp: Game.Inp
 var opacity := 0.85
+var fixed_fire := false # زر رمي ثابت: يرمي لگدام (باتجاه مشيك) بدون تصويب
 var _fingers := {} # رقم الإصبع ← الزر
 var _knob := {"stick": Vector2.ZERO, "fire": Vector2.ZERO}
 var _pressed := {}
@@ -117,6 +119,11 @@ func _move_stick(id: String, pos: Vector2) -> void:
 		_jumped = up
 		inp.move = signf(n.x) * mag
 		inp.down = n.y > 0.7
+	elif fixed_fire:
+		# ثابت: الزر ما يتحرك، يرمي لگدام طول ما ضاغط (لفوگ بس إذا تطفر)
+		_knob[id] = Vector2.ZERO
+		inp.aim = null
+		inp.fire = true
 	else:
 		# التصويب: الاتجاه = وين تأشّر، ويرمي إذا سحبت شوية
 		if n.length() > 0.3:

@@ -47,6 +47,7 @@ var level := 1.0 # صعوبتي
 var token := ""
 var player_name := ""
 var sound_on := true
+var fixed_fire := false # زر الرمي ثابت (يرمي لگدام) بدل التصويب
 var coins_moved := false # فلوس الجهاز انتقلت للحساب
 
 # الحساب
@@ -107,6 +108,7 @@ func _ready() -> void:
 	layer.add_child(hud)
 	touch = preload("res://scripts/controls.gd").new()
 	touch.inp = inp
+	touch.fixed_fire = fixed_fire
 	layer.add_child(touch)
 	ui = Control.new()
 	ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -153,6 +155,7 @@ func _load() -> void:
 	token = cf.get_value("save", "token", "")
 	player_name = cf.get_value("save", "name", "")
 	sound_on = cf.get_value("save", "sound", true)
+	fixed_fire = cf.get_value("save", "fixed_fire", false)
 	coins_moved = cf.get_value("save", "coins_moved", false)
 
 
@@ -166,6 +169,7 @@ func _save() -> void:
 	cf.set_value("save", "token", token)
 	cf.set_value("save", "name", player_name)
 	cf.set_value("save", "sound", sound_on)
+	cf.set_value("save", "fixed_fire", fixed_fire)
 	cf.set_value("save", "coins_moved", coins_moved)
 	cf.save(SAVE_PATH)
 
@@ -484,6 +488,12 @@ func _show_settings(msg := "") -> void:
 		_save()
 		_show_settings(), box)
 	snd.custom_minimum_size = Vector2(320, 56)
+	var ff := _button("زر الرمي: " + ("ثابت (لگدام بس)" if fixed_fire else "تصويب بكل الاتجاهات"), func():
+		fixed_fire = not fixed_fire
+		touch.fixed_fire = fixed_fire
+		_save()
+		_show_settings(), box)
+	ff.custom_minimum_size = Vector2(420, 56)
 	if online:
 		_label("حسابك: %s   -   %s" % [player_name, "محمي برمز" if has_pin else "بدون رمز (أي واحد يكدر يدخل باسمك)"], 22, box, Color("#7bd64a") if has_pin else Color("#ff8a80"))
 		var r := _row(box)
