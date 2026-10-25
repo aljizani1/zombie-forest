@@ -218,6 +218,15 @@ func set_gun(id: String) -> void:
 	muzzle = _pivot(gun, Vector3(0, 0, -length))
 
 
+# يرجع جاهز للاستعمال من جديد (الزومبي ينعادون من مجموعة جاهزة بدال ما ينبنون وينمسحون)
+func reset() -> void:
+	rotation = Vector3.ZERO
+	_phase = 0.0
+	_t = randf() * 10.0
+	set_flash(false)
+	visible = true
+
+
 # لمعة بيضة لمن ينضرب
 func set_flash(on: bool) -> void:
 	if on == _flash:

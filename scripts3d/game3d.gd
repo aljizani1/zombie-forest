@@ -10,6 +10,9 @@ const P_SPEED := 5.2
 const P_R := 0.4
 const MAX_PARTS := 400
 const MAX_BULLETS := 160
+const POPS := 12
+const NADES := 6
+const BOOMS := 4
 
 const LOOKS := {
 	"walker": {skin = Color("#93a86e"), shirt = Color("#4f6f99"), pants = Color("#4a4f5c")},
@@ -108,6 +111,13 @@ var _nades := [] # {p: Vector3, v: Vector3, t, node, owner}
 var _booms := [] # {node, t}
 var _pops := [] # {node, life}
 var _flash: MeshInstance3D
+# مجموعات جاهزة: كل شي ينبني وقت التحميل، وباللعب بس نخفي ونظهر (ماكو بناء ولا مسح وسط القتال)
+var _zpool := {} # النوع ← [Humanoid مخفي]
+var _pop_nodes: Array[Label3D] = []
+var _nade_nodes: Array[MeshInstance3D] = []
+var _boom_nodes: Array[MeshInstance3D] = []
+var _boom_mat: StandardMaterial3D
+const FONT := preload("res://fonts/cairo_bold.tres")
 var _blob_mm: MultiMesh # ظلال دائرية ناعمة تحت الزومبي (رسمة وحدة)
 var _flash_t := 0.0
 var _shots := 0 # للقياس بس (أول طلقة)
@@ -147,11 +157,89 @@ func _ready() -> void:
 	var blob := PlaneMesh.new()
 	blob.size = Vector2(1, 1)
 	_blob_mm = _mm(blob, 64, true, _blob_shader())
+	_make_pools()
 	_flash = MeshInstance3D.new()
 	_flash.mesh = H.mesh("sphere", 0.16)
 	_flash.material_override = H.mat(Color("#ffe9a0"), 0.2, 6.0)
 	_flash.visible = false
 	add_child(_flash)
+
+
+func _make_pools() -> void:
+	for kind in cfg.mix:
+		if cfg.mix[kind] <= 0:
+			continue
+		var list: Array = []
+		for i in cfg.max_alive + 5:
+			list.append(_new_zombie(kind))
+		_zpool[kind] = list
+	for i in POPS:
+		var l := Label3D.new()
+		l.font = FONT
+		l.font_size = 64
+		l.pixel_size = 0.008
+		l.outline_modulate = Color(0, 0, 0, 0.85)
+		l.outline_size = 14
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		l.no_depth_test = true
+		l.visible = false
+		add_child(l)
+		_pop_nodes.append(l)
+	for i in NADES:
+		var node := MeshInstance3D.new()
+		node.mesh = H.mesh("sphere", 0.12, 1.2)
+		node.material_override = H.mat(Color("#4f5e38"), 0.6)
+		node.visible = false
+		add_child(node)
+		_nade_nodes.append(node)
+	# مادة الانفجار وحدة للكل، والتلاشي بـ transparency مال كل كرة
+	_boom_mat = StandardMaterial3D.new()
+	_boom_mat.albedo_color = Color(1.0, 0.7, 0.25, 0.9)
+	_boom_mat.emission_enabled = true
+	_boom_mat.emission = Color(1.0, 0.55, 0.15)
+	_boom_mat.emission_energy_multiplier = 3.0
+	_boom_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_boom_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	for i in BOOMS:
+		var ball := MeshInstance3D.new()
+		ball.mesh = H.mesh("sphere", 1.0)
+		ball.material_override = _boom_mat
+		ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ball.visible = false
+		add_child(ball)
+		_boom_nodes.append(ball)
+
+
+func _new_zombie(kind: String) -> Humanoid:
+	var n := H.new()
+	n.build(kind, LOOKS[kind])
+	n.visible = false
+	add_child(n)
+	return n
+
+
+func _take_zombie(kind: String) -> Humanoid:
+	var list: Array = _zpool.get(kind, [])
+	if list.is_empty():
+		Perf.ev("pool miss " + kind)
+		return _new_zombie(kind)
+	return list.pop_back()
+
+
+func _give_back(z: Z) -> void:
+	z.node.visible = false
+	if not _zpool.has(z.kind):
+		_zpool[z.kind] = []
+	_zpool[z.kind].append(z.node)
+
+
+# أقدم واحد ما مستعمل (أو أقدم واحد بالمرة لو كلهم مستعملين)
+func _free_node(nodes: Array, used: Array) -> Node3D:
+	for n in nodes:
+		if not n.visible:
+			return n
+	var old: Dictionary = used.pop_front()
+	return old.node
 
 
 func _glow_box() -> Mesh:
@@ -363,10 +451,9 @@ func _throw(p: P) -> void:
 	p.grenades -= 1
 	p.g_cd = Config.GRENADE.cooldown
 	var dir := Vector2.from_angle(p.aim)
-	var node := MeshInstance3D.new()
-	node.mesh = H.mesh("sphere", 0.12, 1.2)
-	node.material_override = H.mat(Color("#4f5e38"), 0.6)
-	add_child(node)
+	var node := _free_node(_nade_nodes, _nades)
+	node.visible = true
+	node.position = v3(p.pos, 1.3)
 	_nades.append({p = v3(p.pos, 1.3), v = v3(dir * 11.0, 6.5) + v3(p.vel * 0.4), t = Config.GRENADE.fuse, node = node, owner = p.id})
 	p.recoil = 1
 	sounds.append("throw")
@@ -412,10 +499,9 @@ func _spawn(dt: float) -> void:
 	z.max = z.hp
 	z.atk = randf_range(0.3, 0.8)
 	z.fly = 2.2 if kind == "flyer" else 0.0
-	z.node = H.new()
-	z.node.build(kind, LOOKS[kind])
+	z.node = _take_zombie(kind)
+	z.node.reset()
 	z.node.position = v3(z.pos, z.fly)
-	add_child(z.node)
 	zs.append(z)
 	spawned += 1
 	Perf.ev("spawn " + kind)
@@ -484,8 +570,7 @@ func _update_zombies(dt: float) -> void:
 	_blob_mm.visible_instance_count = nb
 	for z in zs:
 		if z.dead > 2.0:
-			z.node.queue_free()
-			Perf.ev("free zombie")
+			_give_back(z)
 	zs = zs.filter(func(z): return z.dead <= 2.0)
 
 
@@ -600,20 +685,11 @@ func _update_nades(dt: float) -> void:
 
 
 func _explode(n: Dictionary) -> void:
-	n.node.queue_free()
+	n.node.visible = false
 	var c: Vector3 = n.p
-	var ball := MeshInstance3D.new()
-	ball.mesh = H.mesh("sphere", 1.0)
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(1.0, 0.7, 0.25, 0.9)
-	m.emission_enabled = true
-	m.emission = Color(1.0, 0.55, 0.15)
-	m.emission_energy_multiplier = 3.0
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	ball.material_override = m
+	var ball := _free_node(_boom_nodes, _booms)
+	ball.visible = true
 	ball.position = c
-	add_child(ball)
 	_booms.append({node = ball, t = 0.0})
 	shake = maxf(shake, 0.5)
 	sounds.append("boom")
@@ -651,18 +727,11 @@ func _splash(p: Vector3, n: int, cols: Array) -> void:
 
 
 func _pop(p: Vector3, text: String, col: Color) -> void:
-	var l := Label3D.new()
+	var l: Label3D = _free_node(_pop_nodes, _pops)
 	l.text = text
-	l.font = load("res://fonts/cairo_bold.tres")
-	l.font_size = 64
-	l.pixel_size = 0.008
 	l.modulate = col
-	l.outline_modulate = Color(0, 0, 0, 0.85)
-	l.outline_size = 14
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
 	l.position = p
-	add_child(l)
+	l.visible = true
 	Perf.ev("popup " + text)
 	_pops.append({node = l, life = 1.1})
 
@@ -705,10 +774,10 @@ func _update_fx(dt: float) -> void:
 		b.t += dt
 		var k: float = b.t / 0.5
 		b.node.scale = Vector3.ONE * (0.6 + k * 3.2)
-		b.node.material_override.albedo_color.a = 0.9 * (1 - k)
+		b.node.transparency = k
 	for b in _booms:
 		if b.t >= 0.5:
-			b.node.queue_free()
+			b.node.visible = false
 	_booms = _booms.filter(func(b): return b.t < 0.5)
 	# الفلوس اللي تطلع
 	for q in _pops:
@@ -717,7 +786,7 @@ func _update_fx(dt: float) -> void:
 		q.node.modulate.a = minf(1.0, q.life * 2)
 	for q in _pops:
 		if q.life <= 0:
-			q.node.queue_free()
+			q.node.visible = false
 	_pops = _pops.filter(func(q): return q.life > 0)
 	# وميض الطلقة
 	_flash_t -= dt
