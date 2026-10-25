@@ -61,9 +61,18 @@ func _draw() -> void:
 	# المرحلة والقتل
 	var mid := s.x / 2
 	_panel(Rect2(mid - 130, 12, 260, 44))
-	var t := "الصعوبة %.1f   -   %d / %d" % [game.level, game.killed, game.total]
+	var t := "الصعوبة %.1f   -   %d / %d" % [game.level, mini(game.killed, game.total), game.total]
 	var w := font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x
 	_text(t, Vector2(mid - w / 2, 41), 20)
+	# الساحرة: اسمها وصحتها بالنص فوگ
+	var witch := game.witch()
+	if witch != null:
+		_panel(Rect2(mid - 180, 62, 360, 44))
+		draw_rect(Rect2(mid - 165, 88, 330, 10), Color(0.15, 0.05, 0.2, 0.85))
+		draw_rect(Rect2(mid - 165, 88, 330 * clampf(witch.hp / witch.max, 0, 1), 10), Color("#ab47bc"))
+		var wt := "الساحرة"
+		var ww := font.get_string_size(wt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+		_text(wt, Vector2(mid - ww / 2, 82), 18, Color("#d9a3ff"))
 
 	# الفلوس
 	_panel(Rect2(s.x - 164, 12, 150, 44))

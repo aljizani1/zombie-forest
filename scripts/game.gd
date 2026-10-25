@@ -158,6 +158,9 @@ var sounds: Array[String] = []
 var next_id := 1
 var helper_at = null # متى ينزل البوت (نسبة القتل)، null = ما ينزل هاي اللعبة
 var plane = null # {x, y, dir, drop_x, dropped}
+var witch_spawned := false # الساحرة طلعت بهاي الجولة
+var witch_t := 0.0 # انتظار قبل ما تطلع
+var apples: Array = [] # تفاح الساحرة المسموم {x, y, vx, vy, rot, life}
 
 
 # who = {id, name, uniform} للاعب المحلي، net = لعب جماعي، slot = ترتيبه (حتى ما يطلعون فوگ بعض)
@@ -771,6 +774,126 @@ func nearest_target(x: float) -> Player:
 	return target
 
 
+# ════════ الساحرة (آخر الجولة) ════════
+func witch() -> Zombie:
+	for z in zs:
+		if z.kind == "witch" and z.dead == 0:
+			return z
+	return null
+
+
+func spawn_witch() -> void:
+	witch_spawned = true
+	var z := new_zombie(next_id, "witch")
+	next_id += 1
+	var alive := players.filter(func(q): return q.hp > 0 and not q.chute)
+	var anchor: Player = alive[0] if alive.size() else players[0]
+	var side := -1 if anchor.x > map.width / 2 else 1
+	z.x = clampf(anchor.x + side * 520, 0, map.width - z.w)
+	z.y = anchor.y - 450
+	z.face = -side
+	var c: Dictionary = Config.ZOMBIES.witch
+	z.speed = c.speed[0] * cfg.speed_mult
+	# أقوى إذا أكو لاعبين أكثر
+	z.hp = roundf(c.hp * cfg.hp_mult * sqrt(humans().size()) * 10) / 10
+	z.max = z.hp
+	z.atk = 2.0 # أول تفاحة
+	z.jump_cd = 6.0 # أول انقضاض
+	z.on_ground = false
+	zs.append(z)
+	sounds.append("cackle")
+	pops.append({x = anchor.x + PW / 2, y = anchor.y - 60, text = "الساحرة!", life = 2.0, head = true, mine = true})
+
+
+# تحوم فوگ اللاعب وتتمايل، ترمي تفاح مسموم، وكل شوية تنقض عليه
+func witch_ai(z: Zombie, dt: float) -> void:
+	var target := nearest_target(z.x + z.w / 2)
+	z.atk -= dt
+	z.jump_cd -= dt
+	var zx := z.x + z.w / 2
+	if target == null or status != "play":
+		z.vx += (0.0 - z.vx) * minf(1.0, dt * 2)
+		z.vy = -60
+	else:
+		var px := target.x + PW / 2
+		var diving := z.jump_cd <= 0
+		var tx := px if diving else px + sin(time * 0.7 + z.id) * 260
+		var ty := target.y + 30 if diving else target.y - Config.WITCH.hover + sin(time * 2.1) * 30
+		var dx := tx - zx
+		var dy := ty - (z.y + z.h / 2)
+		var len := maxf(0.001, sqrt(dx * dx + dy * dy))
+		var sp := z.speed * (2.3 if diving else 1.0) * minf(1.0, len / 60)
+		var k := minf(1.0, dt * 2.5)
+		z.vx += ((dx / len) * sp - z.vx) * k
+		z.vy += ((dy / len) * sp - z.vy) * k
+		if absf(px - zx) > 4:
+			z.face = 1 if px > zx else -1
+		var touching := absf(px - zx) < (PW + z.w) / 2 and z.y + z.h > target.y + 10 and z.y < target.y + PH
+		if touching:
+			hurt_player(target, z)
+		# الانقضاض يخلص بعد ثانية ونص (أو لمن تضربه) وترجع تطير لفوگ
+		if z.jump_cd < -1.5 or (diving and touching):
+			z.jump_cd = randf_range(5, 8)
+			z.vy = -z.speed * 1.5
+		if z.atk <= 0 and not diving:
+			z.atk = randf_range(Config.WITCH.apple_every[0], Config.WITCH.apple_every[1])
+			z.atk_t = 0.35
+			throw_apple(z, target)
+			if randf() < 0.35:
+				sounds.append("cackle")
+	z.x = clampf(z.x + (z.vx + z.kb) * dt, 0, map.width - z.w)
+	z.y = clampf(z.y + z.vy * dt, -400, map.height - z.h)
+	z.on_ground = false
+
+
+# تفاحة بقوس نحو المكان اللي راح يكون بيه اللاعب
+func throw_apple(z: Zombie, t: Player) -> void:
+	var hx := z.x + z.w / 2 + z.face * 42
+	var hy := z.y + z.h - 95
+	var tx := t.x + PW / 2 + t.vx * 0.5
+	var ty := t.y + PH * 0.4
+	var T := 0.9
+	var gr := Config.GRAVITY * 0.5
+	apples.append({x = hx, y = hy, vx = (tx - hx) / T, vy = (ty - hy - 0.5 * gr * T * T) / T, rot = 0.0, life = 3.0})
+	sounds.append("throw")
+
+
+func update_apples(dt: float) -> void:
+	var gr := Config.GRAVITY * 0.5
+	for a in apples:
+		a.vy += gr * dt
+		a.x += a.vx * dt
+		a.y += a.vy * dt
+		a.rot += dt * 9
+		a.life -= dt
+		if authority:
+			for p in players:
+				if p.hp > 0 and not p.chute and a.x > p.x - 8 and a.x < p.x + PW + 8 and a.y > p.y and a.y < p.y + PH:
+					a.life = 0
+					apple_hit(p, a)
+					break
+		if a.life > 0 and map.solid_at(a.x, a.y):
+			a.life = 0
+			splash(a.x, a.y, 10, [Color("#c62828"), Color("#7bd64a"), Color("#3f8f2f")], 0, 3)
+			sounds.append("apple")
+	apples = apples.filter(func(a): return a.life > 0)
+
+
+func apple_hit(p: Player, a: Dictionary) -> void:
+	splash(a.x, a.y, 14, [Color("#c62828"), Color("#7bd64a"), Color("#3f8f2f")], signf(a.vx), 3.5)
+	sounds.append("apple")
+	if p.inv > 0:
+		return
+	p.hp = maxf(0, p.hp - Config.WITCH.apple_damage)
+	p.inv = 0.6
+	if p.local or p.bot:
+		p.kb = signf(a.vx) * 260
+		if p.on_ground:
+			p.vy = -260
+	if p.local:
+		sounds.append("hurt")
+
+
 # الزومبي الطاير: يحوم فوگ اللاعب وبعدين ينزل عليه
 func flyer_ai(z: Zombie, dt: float) -> void:
 	var target := nearest_target(z.x + z.w / 2)
@@ -996,6 +1119,8 @@ func step(inp: Inp, dt: float) -> void:
 				z.vx = z.net.vx
 		elif z.kind == "flyer":
 			flyer_ai(z, dt)
+		elif z.kind == "witch":
+			witch_ai(z, dt)
 		else:
 			zombie_ai(z, dt)
 			physics(z, dt)
@@ -1057,6 +1182,7 @@ func step(inp: Inp, dt: float) -> void:
 	bullets = bullets.filter(func(b): return b.life > 0 and b.x > -500 and b.x < map.width + 500 and b.y > -600 and b.y < map.height + 100)
 
 	update_grenades(dt)
+	update_apples(dt)
 
 	# ── بقايا ──
 	for q in parts:
@@ -1088,17 +1214,23 @@ func step(inp: Inp, dt: float) -> void:
 	decals = decals.filter(func(d): return d.life > 0)
 
 	# ── نهاية المرحلة (المضيف يقرر) ──
+	# بعد ما يخلصون الزومبي تطلع الساحرة، والجولة تنتهي لمن تموت
 	if authority and status == "play":
-		if killed >= total:
-			status = "won"
-			sounds.append("win")
-		elif humans().all(func(q): return q.hp <= 0):
+		if humans().all(func(q): return q.hp <= 0):
 			status = "lost"
 			sounds.append("lose")
+		elif killed >= total:
+			if not witch_spawned:
+				witch_t += dt
+				if witch_t >= Config.WITCH.delay:
+					spawn_witch()
+			elif witch() == null:
+				status = "won"
+				sounds.append("win")
 
 
 # ════════ اللعب الجماعي: تحويل الحالة لرسايل صغيرة وبالعكس ════════
-const KINDS := ["walker", "tough", "brute", "flyer", "runner", "monster"]
+const KINDS := ["walker", "tough", "brute", "flyer", "runner", "monster", "witch"]
 
 
 # لاعب ثاني: يتحرك بنعومة لآخر مكان وصل (مع توقع بسيط)
@@ -1181,7 +1313,10 @@ func snapshot() -> Dictionary:
 		hp[p.id] = roundi(p.hp)
 	var ev := kills
 	kills = []
-	return {st = ["play", "won", "lost"].find(status), k = killed, n = spawned, z = z, hp = hp, c = credits.duplicate(), ev = ev, te = recent_edits()}
+	var ap := []
+	for a in apples:
+		ap.append_array([roundi(a.x), roundi(a.y), roundi(a.vx), roundi(a.vy)])
+	return {st = ["play", "won", "lost"].find(status), k = killed, n = spawned, z = z, hp = hp, c = credits.duplicate(), ev = ev, te = recent_edits(), ap = ap}
 
 
 func apply_snapshot(s: Dictionary) -> void:
@@ -1210,10 +1345,13 @@ func apply_snapshot(s: Dictionary) -> void:
 			z.y = y
 			if kind == "monster":
 				sounds.append("roar")
+			if kind == "witch":
+				witch_spawned = true
+				sounds.append("cackle")
 			zs.append(z)
 		z.max = mx if mx > 0 else z.max
 		var prev = z.net if z.net != null else {x = x, y = y}
-		z.net = {x = x, y = y, vx = (x - prev.x) * 8, vy = (y - prev.y) * 8 if kind == "flyer" else 0.0, at = time}
+		z.net = {x = x, y = y, vx = (x - prev.x) * 8, vy = (y - prev.y) * 8 if kind == "flyer" or kind == "witch" else 0.0, at = time}
 		z.face = face
 		z.hp = hp
 		z.on_ground = (flags & 8) > 0
@@ -1229,6 +1367,13 @@ func apply_snapshot(s: Dictionary) -> void:
 	zs = zs.filter(func(q): return q.dead > 0 or seen.has(q.id))
 
 	apply_edits(s.get("te"))
+	# تفاح الساحرة: ناخذ مكانه من المضيف ونكمل حركته هنا
+	var ap: Array = s.get("ap", [])
+	apples = []
+	var j := 0
+	while j + 3 < ap.size():
+		apples.append({x = float(ap[j]), y = float(ap[j + 1]), vx = float(ap[j + 2]), vy = float(ap[j + 3]), rot = 0.0, life = 3.0})
+		j += 4
 	killed = int(s.get("k", killed))
 	spawned = int(s.get("n", spawned))
 	credits = s.get("c", credits)

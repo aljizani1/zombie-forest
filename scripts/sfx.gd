@@ -10,6 +10,7 @@ var _players: Array[AudioStreamPlayer] = []
 var _next := 0
 var _last := {} # آخر وقت اشتغل بيه كل صوت (حتى ما تتكدس نفس الأصوات بنفس اللحظة)
 var enabled := true
+var _music: AudioStreamPlayer # موسيقى الساحرة (تلف لحد ما تموت)
 
 # الصوت ← [عدد النسخ، القوة بالديسيبل، أقل وقت بين مرتين]
 const SOUNDS := {
@@ -19,6 +20,7 @@ const SOUNDS := {
 	"boom": [2, -2.0, 0.08], "reload": [2, -9.0, 0.2], "roar": [2, -3.0, 0.5],
 	"dig": [3, -8.0, 0.12], "build": [2, -8.0, 0.12], "break": [2, -5.0, 0.1],
 	"plane": [1, -10.0, 1.0], "win": [1, -6.0, 1.0], "lose": [1, -6.0, 1.0],
+	"cackle": [3, -2.0, 0.9], "apple": [2, -8.0, 0.08],
 }
 
 
@@ -30,6 +32,19 @@ func _ready() -> void:
 	# نصنع كل الأصوات وقت التحميل (مو وقت اللعب) حتى ما يصير أي تقطيع
 	for name in SOUNDS:
 		_fill(name)
+	_music = AudioStreamPlayer.new()
+	_music.volume_db = -9.0
+	add_child(_music)
+	_build_music()
+
+
+# تشتغل وتوگف حسب وجود الساحرة (اللعبة تناديها كل إطار)
+func music(on: bool) -> void:
+	on = on and enabled and _music.stream != null
+	if on and not _music.playing:
+		_music.play()
+	elif not on and _music.playing:
+		_music.stop()
 
 
 func _fill(name: String) -> void:
@@ -114,7 +129,60 @@ func _make(name: String, variant: int) -> AudioStreamWAV:
 			s = _melody([523.0, 659.0, 784.0, 1047.0], 0.12)
 		"lose":
 			s = _melody([392.0, 330.0, 262.0, 196.0], 0.16)
+		"cackle":
+			# ضحكة ساحرة: "ها ها ها" حادة تنزل نبرتها
+			s = PackedFloat32Array()
+			s.resize(int(RATE * 1.25))
+			var f: float = j.call(560.0, 660.0)
+			for k in 8:
+				var d := 1.0 - k * 0.04
+				_mix(s, _groan(r, 0.11, f * d, f * 0.8 * d, 0.3), int(RATE * (0.03 + k * 0.13)))
+		"apple":
+			s = _noise(r, 0.12, j.call(0.3, 0.45), 30)
+			_mix(s, _tone(j.call(180, 230), 0.1, 30, 0.5), 0)
 	return _wav(s)
+
+
+# ── موسيقى الساحرة (من صنعنا): أربيجيو هارپسيكورد بمقام ري صغير فوگ رنّة واطية مرعبة ──
+# تنصنع شوية شوية بأول الإطارات حتى التشغيل ما يتأخر
+func _build_music() -> void:
+	var beat := 0.2
+	var chords := [[293.7, 349.2, 440.0], [233.1, 293.7, 349.2], [196.0, 233.1, 293.7], [220.0, 277.2, 329.6]]
+	var n := int(RATE * beat * 12 * chords.size())
+	var s := PackedFloat32Array()
+	s.resize(n)
+	var at := 0
+	for c in chords:
+		for bar in 2:
+			_mix(s, _pluck(c[0] / 2, beat * 6, 2.5, 0.5), at)
+			var pat: Array = [c[0] * 2, c[1] * 2, c[2] * 2, c[0] * 4, c[2] * 2, c[1] * 2] if bar == 0 else [c[2] * 2, c[0] * 4, c[1] * 4, c[0] * 4, c[2] * 2, c[1] * 2]
+			for k in 6:
+				_mix(s, _pluck(pat[k], beat * 2, 7.0, 0.28), at + int(RATE * beat * k))
+			await get_tree().process_frame
+			at += int(RATE * beat * 6)
+	var i := 0
+	while i < n:
+		for q in range(i, mini(n, i + 20000)):
+			s[q] += sin(TAU * 73.4 * q / RATE) * 0.08 * (0.6 + 0.4 * sin(TAU * 0.5 * q / RATE))
+		i += 20000
+		await get_tree().process_frame
+	var w := _wav(s)
+	w.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	w.loop_end = n
+	_music.stream = w
+
+
+# نغمة منتوفة (مثل الهارپسيكورد): أساس + توافقيات وتخفت
+func _pluck(freq: float, dur: float, decay: float, amp: float) -> PackedFloat32Array:
+	var n := int(RATE * dur)
+	var s := PackedFloat32Array()
+	s.resize(n)
+	var w := TAU * freq / RATE
+	for i in n:
+		var t := float(i) / RATE
+		var ph := w * i
+		s[i] = (sin(ph) + 0.5 * sin(ph * 2) + 0.25 * sin(ph * 3)) * amp * exp(-decay * t) * minf(1.0, t * 200)
+	return s
 
 
 # طلقة: انفجار ضوضاء حاد + ضربة واطية

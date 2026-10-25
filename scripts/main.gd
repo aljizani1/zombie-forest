@@ -733,6 +733,8 @@ func _process(delta: float) -> void:
 		if _touch_t > 60:
 			_touch_t = 0
 			supa.call_fn("player_touch", {p_token = token})
+	# موسيقى الساحرة طول ما هي عايشة
+	Sfx.music(game != null and game.status == "play" and game.witch() != null)
 	if game == null:
 		return
 	var dt := minf(delta, 1.0 / 30)
@@ -997,6 +999,26 @@ func _auto_play(delta: float) -> void:
 			inp.aim = PI
 		if _shot_t > 6.0:
 			print("dig test: bricks left=", me.bricks, " y=", me.y)
+			get_viewport().get_texture().get_image().save_png(_shot)
+			get_tree().quit()
+		return
+	# فحص الساحرة: الزومبي يخلصون فوراً، وبعدين نرمي عليها
+	var args := OS.get_cmdline_user_args()
+	if args.has("--witch"):
+		var me := game.me()
+		me.hp = me.max_hp
+		if _shot_t < delta * 1.5:
+			game.zs.clear()
+			game.killed = game.total
+			game.spawned = game.total
+		var w := game.witch()
+		inp.move = 0.3 * sin(_shot_t)
+		inp.fire = w != null and args.has("--shoot")
+		if w != null:
+			inp.aim = (Vector2(w.x + w.w / 2, w.y + w.h * 0.5) - Vector2(me.x + Game.PW / 2, me.y + 40)).angle()
+		var at := float(args[args.find("--witch") + 1]) if args.size() > args.find("--witch") + 1 and args[args.find("--witch") + 1].is_valid_float() else 5.0
+		if _shot_t > at:
+			print("witch test: spawned=", game.witch_spawned, " hp=", w.hp if w != null else -1.0, " apples=", game.apples.size(), " status=", game.status, " music=", Sfx._music.playing)
 			get_viewport().get_texture().get_image().save_png(_shot)
 			get_tree().quit()
 		return
