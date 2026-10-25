@@ -260,9 +260,9 @@ func _scroll(parent: Control, height := 330.0, width := 760.0) -> VBoxContainer:
 
 
 func _stop_game() -> void:
-	game = null
 	if game != null:
 		game.queue_free()
+	game = null
 	hud.game = null
 	hud.visible = false
 	touch.visible = false
@@ -613,6 +613,8 @@ func _begin(g: Game3D) -> void:
 	_clear_ui()
 	inp = Game3D.Inp.new()
 	touch.inp = inp
+	if game != null:
+		game.queue_free() # الجولة اللي قبلها (من زر الجولة الجاية)
 	game = g
 	park.add_child(game)
 	# زر الخروج (فوگ يسار تحت معلومات السلاح)
