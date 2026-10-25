@@ -15,6 +15,7 @@ var boxes: Array = [] # Rect2 بالـ XZ (سور، مصاطب...)
 var cam: Camera3D
 var sun: DirectionalLight3D
 var env: Environment
+var vignette: CanvasLayer
 var rng := RandomNumberGenerator.new()
 const GRASS := preload("res://assets/textures/grass.jpg")
 const STONE := preload("res://assets/textures/stone.jpg")
@@ -78,8 +79,8 @@ float noise(vec2 p) {
 func _light() -> void:
 	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-58, -35, 0)
-	sun.light_energy = 1.0
-	sun.light_color = Color("#fff3df")
+	sun.light_energy = 1.15
+	sun.light_color = Color("#ffe2b8") # شمس دافية
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	sun.directional_shadow_max_distance = 45
@@ -89,8 +90,8 @@ func _light() -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color("#9cc9e8")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("#b9cfe0")
-	env.ambient_light_energy = 0.35
+	env.ambient_light_color = Color("#9fbbe0") # ظل مزرق شوية
+	env.ambient_light_energy = 0.45
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.tonemap_exposure = 1.05
 	env.fog_enabled = true
@@ -99,6 +100,25 @@ func _light() -> void:
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
+	# تعتيم خفيف على أطراف الشاشة (تحت معلومات اللعب)
+	vignette = CanvasLayer.new()
+	vignette.layer = 1
+	add_child(vignette)
+	var r := ColorRect.new()
+	r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sh := Shader.new()
+	sh.code = """
+shader_type canvas_item;
+void fragment() {
+	float v = smoothstep(0.4, 0.95, length((UV - 0.5) * vec2(1.0, 0.85)) * 1.25);
+	COLOR = vec4(0.0, 0.01, 0.03, v * 0.42);
+}
+"""
+	var vm := ShaderMaterial.new()
+	vm.shader = sh
+	r.material = vm
+	vignette.add_child(r)
 
 
 # 0 منخفضة، 1 متوسطة، 2 عالية
@@ -108,6 +128,7 @@ func apply_quality(q: int) -> void:
 	sun.directional_shadow_max_distance = 32.0 if q == 1 else 45.0
 	RenderingServer.directional_shadow_atlas_set_size(1024 if q < 2 else 4096, true)
 	env.fog_enabled = q > 0
+	vignette.visible = q > 0
 
 
 # ── الأرض: عشب بألوان متغيرة ──
