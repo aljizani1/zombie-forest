@@ -81,6 +81,9 @@ func _ready() -> void:
 
 	park = Park.new()
 	add_child(park)
+	Perf.park = park
+	Perf.apply_quality()
+	Perf.quality_changed.connect(_save)
 
 	var layer := CanvasLayer.new()
 	layer.layer = 5
@@ -106,6 +109,8 @@ func _ready() -> void:
 			_bench.shot = args[i + 1]
 		level = float(args[args.find("--level") + 1]) if args.has("--level") else 15.0
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+		Perf.quality = args[args.find("--quality") + 1] if args.has("--quality") else "high"
+		Perf.apply_quality()
 		_start()
 		return
 	if args.has("--shot"):
@@ -146,6 +151,8 @@ func _load() -> void:
 	player_name = cf.get_value("save", "name", "")
 	sound_on = cf.get_value("save", "sound", true)
 	coins_moved = cf.get_value("save", "coins_moved", false)
+	Perf.quality = cf.get_value("save", "quality", "auto")
+	Perf.auto_level = cf.get_value("save", "auto_level", 2)
 
 
 func _save() -> void:
@@ -159,6 +166,8 @@ func _save() -> void:
 	cf.set_value("save", "name", player_name)
 	cf.set_value("save", "sound", sound_on)
 	cf.set_value("save", "coins_moved", coins_moved)
+	cf.set_value("save", "quality", Perf.quality)
+	cf.set_value("save", "auto_level", Perf.auto_level)
 	cf.save(SAVE_PATH)
 
 
@@ -469,6 +478,11 @@ func _show_settings(msg := "") -> void:
 		_save()
 		_show_settings(), box)
 	snd.custom_minimum_size = Vector2(320, 56)
+	var q := _button("الجودة: " + Perf.quality_name(), func():
+		Perf.cycle_quality()
+		_save()
+		_show_settings(), box)
+	q.custom_minimum_size = Vector2(320, 56)
 	if online:
 		_label("حسابك: %s   -   %s" % [player_name, "محمي برمز" if has_pin else "بدون رمز (أي واحد يكدر يدخل باسمك)"], 22, box, Color("#7bd64a") if has_pin else Color("#ff8a80"))
 		var r := _row(box)

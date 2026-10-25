@@ -13,6 +13,8 @@ const RING_OUT := 15.5
 var obstacles: Array = [] # {p: Vector2, r: float} دواير
 var boxes: Array = [] # Rect2 بالـ XZ (سور، مصاطب...)
 var cam: Camera3D
+var sun: DirectionalLight3D
+var env: Environment
 var rng := RandomNumberGenerator.new()
 var _mats := {}
 
@@ -71,7 +73,7 @@ float noise(vec2 p) {
 
 # ── الضوء والجو ──
 func _light() -> void:
-	var sun := DirectionalLight3D.new()
+	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-58, -35, 0)
 	sun.light_energy = 1.0
 	sun.light_color = Color("#fff3df")
@@ -80,7 +82,7 @@ func _light() -> void:
 	sun.directional_shadow_max_distance = 45
 	sun.shadow_blur = 1.5
 	add_child(sun)
-	var env := Environment.new()
+	env = Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color("#9cc9e8")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -94,6 +96,15 @@ func _light() -> void:
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
+
+
+# 0 منخفضة، 1 متوسطة، 2 عالية
+func apply_quality(q: int) -> void:
+	get_viewport().scaling_3d_scale = [0.7, 0.85, 1.0][q]
+	sun.shadow_enabled = q > 0
+	sun.directional_shadow_max_distance = 32.0 if q == 1 else 45.0
+	RenderingServer.directional_shadow_atlas_set_size(1024 if q < 2 else 4096, true)
+	env.fog_enabled = q > 0
 
 
 # ── الأرض: عشب بألوان متغيرة ──

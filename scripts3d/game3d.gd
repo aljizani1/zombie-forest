@@ -212,6 +212,7 @@ func _loading() -> void:
 	if not is_inside_tree():
 		return
 	loaded = true
+	Perf.auto_reset()
 	_load_ui.queue_free()
 	Perf.ev("loaded")
 
@@ -285,8 +286,14 @@ func _warm_up() -> void:
 		mm.visible_instance_count = 1
 		mm.set_instance_transform(0, Transform3D(Basis.IDENTITY, c + Vector3(0, 0.5, 1)))
 		mm.set_instance_color(0, Color(1, 1, 1, 0.5))
-	for k in 3:
-		_load_bar.value = 0.85 + 0.05 * (k + 1)
+	# أول إطارين: الكاميرا عالية تشوف الحديقة كلها (حتى مواد المناظر اللي بعيدة تتجهز هم)، وبعدين قريبة
+	for k in 4:
+		if k == 0:
+			park.cam.position = Vector3(0, 115, 0.5)
+			park.cam.look_at(Vector3.ZERO)
+		elif k == 2:
+			_camera(1.0)
+		_load_bar.value = 0.85 + 0.035 * (k + 1)
 		await get_tree().process_frame
 		if not is_inside_tree():
 			return
@@ -469,6 +476,8 @@ func aim_at_screen(sp: Vector2):
 func step(inp: Inp, dt: float) -> void:
 	if not loaded:
 		return
+	if time < 5.5:
+		Perf.auto_sample(dt)
 	time += dt
 	if status != "play":
 		end_t += dt
@@ -871,9 +880,10 @@ func _explode(n: Dictionary) -> void:
 # ════════ مؤثرات ════════
 func _add_part(p: Vector3, v: Vector3, life: float, col: Color, size: float, smoke := false) -> void:
 	var i := _np
-	if _np >= MAX_PARTS: # مليانة: نبدّل وحدة قديمة
+	var cap := Perf.max_parts()
+	if _np >= cap: # مليانة: نبدّل وحدة قديمة
 		i = _p_over
-		_p_over = (_p_over + 1) % MAX_PARTS
+		_p_over = (_p_over + 1) % cap
 	else:
 		_np += 1
 	_pp[i] = p

@@ -16,6 +16,69 @@ var _frames := 0
 var _ms_max := 0.0
 var _touches := {}
 
+# ════════ الجودة ════════
+# auto (الافتراضي) يبدي بـ "عالية" ويقيس أول 5 ثواني من اللعب: إذا المعدل أقل من 50 FPS ينزل درجة (ويحفظها).
+# منخفضة: دقة 70%، بدون ظلال، بدون ضباب، جزيئات أقل. متوسطة: دقة 85%، ظلال بخريطة صغيرة. عالية: كلشي.
+signal quality_changed
+const Q_NAMES := ["منخفضة", "متوسطة", "عالية"]
+var quality := "auto" # auto / low / medium / high
+var auto_level := 2 # الدرجة اللي وصلها التلقائي
+var park: Park
+var _q_acc := 0.0
+var _q_frames := 0
+
+
+func level() -> int:
+	match quality:
+		"low":
+			return 0
+		"medium":
+			return 1
+		"high":
+			return 2
+	return auto_level
+
+
+func quality_name() -> String:
+	return ("تلقائي (%s)" % Q_NAMES[auto_level]) if quality == "auto" else Q_NAMES[level()]
+
+
+func cycle_quality() -> void:
+	quality = {"auto": "low", "low": "medium", "medium": "high", "high": "auto"}[quality]
+	apply_quality()
+
+
+func max_parts() -> int:
+	return 150 if level() == 0 else 400
+
+
+func apply_quality() -> void:
+	if park != null:
+		park.apply_quality(level())
+
+
+# اللعبة تناديها كل إطار بأول 5 ثواني من الجولة
+func auto_sample(dt: float) -> void:
+	if quality != "auto":
+		return
+	_q_acc += dt
+	_q_frames += 1
+	if _q_acc < 5.0:
+		return
+	var fps := _q_frames / _q_acc
+	_q_acc = 0
+	_q_frames = 0
+	if fps < 50 and auto_level > 0:
+		auto_level -= 1
+		print("[quality] %.0f fps -> %s" % [fps, Q_NAMES[auto_level]])
+		apply_quality()
+		quality_changed.emit()
+
+
+func auto_reset() -> void:
+	_q_acc = 0
+	_q_frames = 0
+
 
 func _ready() -> void:
 	layer = 100
