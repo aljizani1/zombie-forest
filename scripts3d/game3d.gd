@@ -103,7 +103,17 @@ var _next := 1
 # مؤثرات (مصفوفات + MultiMesh)
 var _bul := [] # {p: Vector3, v: Vector3, dmg, life, owner}
 var _bul_mm: MultiMesh
-var _parts := [] # {p, v, life, max, col, s}
+# الجزيئات بمصفوفات Packed (بدون Dictionary ولا مصفوفة جديدة كل إطار) وتنكتب للـ MultiMesh دفعة وحدة
+var _np := 0
+var _pp := PackedVector3Array() # الموقع
+var _pv := PackedVector3Array() # السرعة
+var _pl := PackedFloat32Array() # العمر الباقي
+var _pm := PackedFloat32Array() # العمر الكلي
+var _ps := PackedFloat32Array() # الحجم
+var _pc := PackedColorArray()
+var _psm := PackedByteArray() # دخان؟
+var _pbuf := PackedFloat32Array() # 16 رقم لكل جزيء (تحويل 3×4 + لون)
+var _p_over := 0
 var _part_mm: MultiMesh
 var _decals := [] # {p, r, life}
 var _decal_mm: MultiMesh
@@ -151,6 +161,14 @@ func _ready() -> void:
 	add_child(m.node)
 	_bul_mm = _mm(_glow_box(), MAX_BULLETS, true)
 	_part_mm = _mm(H.mesh("sphere", 0.5), MAX_PARTS, true)
+	for a in [_pp, _pv]:
+		a.resize(MAX_PARTS)
+	for a in [_pl, _pm, _ps]:
+		a.resize(MAX_PARTS)
+	_pc.resize(MAX_PARTS)
+	_psm.resize(MAX_PARTS)
+	_pbuf.resize(MAX_PARTS * 16)
+	_pbuf.fill(0.0)
 	var disc := CylinderMesh.new()
 	disc.top_radius = 1.0
 	disc.bottom_radius = 1.0
@@ -581,7 +599,10 @@ func _throw(p: P) -> void:
 func _spawn(dt: float) -> void:
 	if status != "play" or spawned >= total:
 		return
-	var living := zs.filter(func(z): return z.dead == 0).size()
+	var living := 0
+	for z in zs:
+		if z.dead == 0:
+			living += 1
 	var prog := float(spawned) / total
 	spawn_cd -= dt
 	if spawn_cd > 0 or living >= cfg.max_alive + int(prog * 4):
@@ -649,9 +670,10 @@ func _update_zombies(dt: float) -> void:
 		for o in zs:
 			if o != z and o.dead == 0:
 				var d: Vector2 = z.pos - o.pos
-				var l := d.length()
-				if l < (z.r + o.r) * 1.1 and l > 0.001:
-					want += d / l * z.speed * 0.8
+				var l2 := d.length_squared()
+				var lim: float = (z.r + o.r) * 1.1
+				if l2 < lim * lim and l2 > 0.000001:
+					want += d / sqrt(l2) * z.speed * 0.8
 		z.vel = z.vel.lerp(want, minf(1.0, dt * 6))
 		var reach: float = z.r + P_R + 0.35
 		if dist < reach:
@@ -685,10 +707,14 @@ func _update_zombies(dt: float) -> void:
 		_blob_mm.set_instance_color(nb, Color(0, 0, 0, a))
 		nb += 1
 	_blob_mm.visible_instance_count = nb
+	var j := 0
 	for z in zs:
 		if z.dead > 2.0:
 			_give_back(z)
-	zs = zs.filter(func(z): return z.dead <= 2.0)
+		else:
+			zs[j] = z
+			j += 1
+	zs.resize(j)
 
 
 func _hurt(p: P, z: Z) -> void:
@@ -734,7 +760,8 @@ func _update_bullets(dt: float) -> void:
 			if z.dead > 0:
 				continue
 			var t := clampf((z.pos - a2).dot(seg) / maxf(seg.length_squared(), 0.0001), 0, 1)
-			if (a2 + seg * t).distance_to(z.pos) < z.r + 0.12 and t < best_t:
+			var hr: float = z.r + 0.12
+			if (a2 + seg * t).distance_squared_to(z.pos) < hr * hr and t < best_t:
 				best_t = t
 				best = z
 		if best != null:
@@ -763,7 +790,12 @@ func _update_bullets(dt: float) -> void:
 			_splash(nxt, 4, [Color("#8a6a4a"), Color("#c9b28c")])
 			continue
 		b.p = nxt
-	_bul = _bul.filter(func(b): return b.life > 0)
+	var j := 0
+	for b in _bul:
+		if b.life > 0:
+			_bul[j] = b
+			j += 1
+	_bul.resize(j)
 	_bul_mm.visible_instance_count = mini(_bul.size(), MAX_BULLETS)
 	for i in _bul_mm.visible_instance_count:
 		var b: Dictionary = _bul[i]
@@ -798,7 +830,12 @@ func _update_nades(dt: float) -> void:
 		n.t -= dt
 		if n.t <= 0:
 			_explode(n)
-	_nades = _nades.filter(func(n): return n.t > 0)
+	var j := 0
+	for n in _nades:
+		if n.t > 0:
+			_nades[j] = n
+			j += 1
+	_nades.resize(j)
 
 
 func _explode(n: Dictionary) -> void:
@@ -833,9 +870,19 @@ func _explode(n: Dictionary) -> void:
 
 # ════════ مؤثرات ════════
 func _add_part(p: Vector3, v: Vector3, life: float, col: Color, size: float, smoke := false) -> void:
-	if _parts.size() >= MAX_PARTS:
-		_parts.pop_front()
-	_parts.append({p = p, v = v, life = life, max = life, col = col, s = size, smoke = smoke})
+	var i := _np
+	if _np >= MAX_PARTS: # مليانة: نبدّل وحدة قديمة
+		i = _p_over
+		_p_over = (_p_over + 1) % MAX_PARTS
+	else:
+		_np += 1
+	_pp[i] = p
+	_pv[i] = v
+	_pl[i] = life
+	_pm[i] = life
+	_ps[i] = size
+	_pc[i] = col
+	_psm[i] = 1 if smoke else 0
 
 
 func _splash(p: Vector3, n: int, cols: Array) -> void:
@@ -855,31 +902,60 @@ func _pop(p: Vector3, text: String, col: Color) -> void:
 
 func _update_fx(dt: float) -> void:
 	# جزيئات
-	for q in _parts:
-		if q.smoke:
-			q.v *= pow(0.5, dt)
-			q.s += dt * 0.5
+	var drag := pow(0.5, dt)
+	var j := 0
+	for i in _np:
+		var life := _pl[i] - dt
+		if life <= 0:
+			continue
+		var v := _pv[i]
+		var s := _ps[i]
+		var smoke := _psm[i] == 1
+		if smoke:
+			v *= drag
+			s += dt * 0.5
 		else:
-			q.v.y -= 14.0 * dt
-		q.p += q.v * dt
-		if q.p.y < 0.03 and not q.smoke:
-			q.p.y = 0.03
-			q.v *= 0.3
-		q.life -= dt
-	_parts = _parts.filter(func(q): return q.life > 0)
-	_part_mm.visible_instance_count = _parts.size()
-	for i in _parts.size():
-		var q: Dictionary = _parts[i]
-		var col: Color = q.col
-		col.a *= minf(1.0, q.life / q.max * 2)
-		_part_mm.set_instance_transform(i, Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * q.s * 2), q.p))
-		_part_mm.set_instance_color(i, col)
+			v.y -= 14.0 * dt
+		var q := _pp[i] + v * dt
+		if q.y < 0.03 and not smoke:
+			q.y = 0.03
+			v *= 0.3
+		var col := _pc[i]
+		_pp[j] = q
+		_pv[j] = v
+		_pl[j] = life
+		_pm[j] = _pm[i]
+		_ps[j] = s
+		_pc[j] = col
+		_psm[j] = _psm[i]
+		col.a *= minf(1.0, life / _pm[j] * 2)
+		var o := j * 16
+		_pbuf[o] = s * 2
+		_pbuf[o + 3] = q.x
+		_pbuf[o + 5] = s * 2
+		_pbuf[o + 7] = q.y
+		_pbuf[o + 10] = s * 2
+		_pbuf[o + 11] = q.z
+		_pbuf[o + 12] = col.r
+		_pbuf[o + 13] = col.g
+		_pbuf[o + 14] = col.b
+		_pbuf[o + 15] = col.a
+		j += 1
+	_np = j
+	if _p_over >= _np:
+		_p_over = 0
+	_part_mm.buffer = _pbuf
+	_part_mm.visible_instance_count = _np
 	# بقع الدم والحروق
+	j = 0
 	for d in _decals:
 		d.life -= dt
-	_decals = _decals.filter(func(d): return d.life > 0)
-	if _decals.size() > 80:
-		_decals = _decals.slice(_decals.size() - 80)
+		if d.life > 0:
+			_decals[j] = d
+			j += 1
+	_decals.resize(j)
+	while _decals.size() > 80:
+		_decals.pop_front()
 	_decal_mm.visible_instance_count = _decals.size()
 	for i in _decals.size():
 		var d: Dictionary = _decals[i]
@@ -892,19 +968,27 @@ func _update_fx(dt: float) -> void:
 		var k: float = b.t / 0.5
 		b.node.scale = Vector3.ONE * (0.6 + k * 3.2)
 		b.node.transparency = k
+	j = 0
 	for b in _booms:
 		if b.t >= 0.5:
 			b.node.visible = false
-	_booms = _booms.filter(func(b): return b.t < 0.5)
+		else:
+			_booms[j] = b
+			j += 1
+	_booms.resize(j)
 	# الفلوس اللي تطلع
 	for q in _pops:
 		q.life -= dt
 		q.node.position.y += dt * 1.2
 		q.node.modulate.a = minf(1.0, q.life * 2)
+	j = 0
 	for q in _pops:
 		if q.life <= 0:
 			q.node.visible = false
-	_pops = _pops.filter(func(q): return q.life > 0)
+		else:
+			_pops[j] = q
+			j += 1
+	_pops.resize(j)
 	# وميض الطلقة
 	_flash_t -= dt
 	_flash.visible = _flash_t > 0

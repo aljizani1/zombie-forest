@@ -981,9 +981,12 @@ func _bench_play(delta: float) -> void:
 		b.frames.append([delta * 1000.0, Perf.draw_calls(), alive, Perf.nodes(), firing])
 	if b.t > 13.0 and not b.has("pic"):
 		b.pic = get_viewport().get_texture().get_image() # تنحفظ بالآخر (الحفظ نفسه يعمل spike)
+	if b.t > 20.0 and not b.has("pic2"):
+		b.pic2 = get_viewport().get_texture().get_image() # وسط القتال
 	if b.t < 34.0:
 		return
 	b.pic.save_png(b.shot)
+	b.pic2.save_png(b.shot.replace(".png", "_fight.png"))
 	var n := 0
 	var ms := 0.0
 	var dc := 0.0
