@@ -550,8 +550,7 @@ func _update_player(p: P, inp: Inp, dt: float) -> void:
 	n.position = v3(p.pos)
 	n.rotation.y = -p.aim - PI / 2
 	if p.hp <= 0:
-		n.rotation.x = lerpf(n.rotation.x, -1.45, minf(1.0, dt * 6))
-		n.animate(dt, 0, "walk")
+		n.animate(dt, 0, "dead")
 	else:
 		var fwd := Vector2.from_angle(p.aim)
 		n.animate(dt, p.vel.length() * (1.0 if p.vel.dot(fwd) >= -0.2 else -1.0), "walk", 0, p.recoil)
@@ -665,9 +664,9 @@ func _update_zombies(dt: float) -> void:
 		if z.dead > 0:
 			z.dead += dt
 			var n: Humanoid = z.node
-			n.rotation.x = lerpf(n.rotation.x, -1.5, minf(1.0, dt * 7))
-			n.position.y = lerpf(n.position.y, -0.2 if z.dead > 1.2 else 0.0, minf(1.0, dt * 4))
-			n.animate(dt, 0, "walk")
+			# أنيميشن الموت، وبعدين ينزل بالأرض
+			n.position.y = 0.0 if z.dead < 1.1 else -(z.dead - 1.1) * 0.9
+			n.animate(dt, 0, "dead")
 			n.set_flash(false)
 			continue
 		var to: Vector2 = p.pos - z.pos

@@ -1,0 +1,11 @@
+Assets used in SP Zombie (all CC0 / public domain, free for commercial use)
+
+characters/zombie.glb
+  "Zombie" by Quaternius - CC0 1.0 (public domain)
+  https://poly.pizza/m/VlXjG0N8Eg  (direct: https://static.poly.pizza/c4002f69-6979-42e8-ad6e-2f4e14fc3a9d.glb)
+
+characters/soldier.glb  (also provides the Pistol / AK / Sniper_2 weapon meshes)
+  "Character Soldier" by Quaternius - CC0 1.0 (public domain)
+  https://poly.pizza/m/PpLF4rt4ah  (direct: https://static.poly.pizza/1083c1d3-d1d4-4682-adf6-bc516d06ac84.glb)
+
+fonts/Cairo.ttf - SIL Open Font License (see fonts/OFL.txt)

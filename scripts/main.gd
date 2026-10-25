@@ -992,7 +992,7 @@ func _bench_play(delta: float) -> void:
 	if firing and fmod(b.t, 2.5) < delta:
 		inp.throw = true
 	if b.t > 1.0:
-		b.frames.append([delta * 1000.0, Perf.draw_calls(), alive, Perf.nodes(), firing])
+		b.frames.append([delta * 1000.0, Perf.draw_calls(), alive, Perf.nodes(), firing, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0])
 	if b.t > 13.0 and not b.has("pic"):
 		b.pic = get_viewport().get_texture().get_image() # تنحفظ بالآخر (الحفظ نفسه يعمل spike)
 	if b.t > 20.0 and not b.has("pic2"):
@@ -1005,6 +1005,7 @@ func _bench_play(delta: float) -> void:
 	var ms := 0.0
 	var dc := 0.0
 	var dc_max := 0
+	var proc := 0.0
 	var over25 := 0
 	var over33 := 0
 	var worst := 0.0
@@ -1017,12 +1018,13 @@ func _bench_play(delta: float) -> void:
 			ms += f[0]
 			dc += f[1]
 			dc_max = maxi(dc_max, f[1])
+			proc += f[5]
 	var peak := 0
 	for f in b.frames:
 		peak = maxi(peak, f[2])
 	print("BENCH %s level=%.0f peak_alive=%d frames=%d" % [RenderingServer.get_current_rendering_method(), level, peak, b.frames.size()])
 	if n > 0:
-		print("BENCH with>=18 zombies: avg %.2f ms (%.0f fps)  draw calls avg %.0f max %d  nodes %d" % [ms / n, 1000.0 / (ms / n), dc / n, dc_max, Perf.nodes()])
+		print("BENCH with>=18 zombies: avg %.2f ms (%.0f fps)  scripts+anim %.2f ms  draw calls avg %.0f max %d  nodes %d" % [ms / n, 1000.0 / (ms / n), proc / n, dc / n, dc_max, Perf.nodes()])
 	print("BENCH worst frame %.1f ms  frames>25ms: %d  frames>33ms: %d" % [worst, over25, over33])
 	var sp: Array = Perf.spikes.duplicate()
 	sp.sort_custom(func(x, y): return x[0] > y[0])
